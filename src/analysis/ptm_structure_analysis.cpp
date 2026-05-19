@@ -17,8 +17,14 @@
 
 namespace Volt::PtmStructureAnalysisDetail {
 
-bool setupPTM(StructureContext& context, Volt::PTM& ptm, size_t particleCount){
-    ptm.setCalculateDefGradient(false);
+bool setupPTM(StructureContext& context, Volt::PTM& ptm, size_t particleCount, bool collectDefGradient){
+    // Why: the deformation gradient is the atom-level analogue of OVITO's
+    // `Particles::ElasticDeformationGradientProperty`. We ask PTM for it
+    // whenever a PtmLocalAtomState container is supplied so downstream
+    // code (atoms.msgpack exporter) can surface it. When no state
+    // container is requested (e.g. cluster-only passes from internal
+    // helpers) we keep the cheaper path that skips the 3x3 matrix.
+    ptm.setCalculateDefGradient(collectDefGradient);
     ptm.setRmsdCutoff(std::numeric_limits<double>::infinity());
     ptm.setInputCrystalStructure(context.inputCrystalType);
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
@@ -97,7 +103,8 @@ void determineLocalStructuresWithPTM(
     analysis.setCrystalInfoProvider(PtmStructureAnalysisDetail::ptmCrystalInfoProvider());
 
     Volt::PTM ptm;
-    if(!PtmStructureAnalysisDetail::setupPTM(context, ptm, N)){
+    const bool collectPerAtomState = static_cast<bool>(atomStates);
+    if(!PtmStructureAnalysisDetail::setupPTM(context, ptm, N, collectPerAtomState)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
 
@@ -148,6 +155,11 @@ void determineLocalStructuresWithPTM(
                 auto& atomState = (*atomStates)[i];
                 atomState.orientation = kernel.orientation().normalized();
                 atomState.rmsd = kernel.rmsd();
+                atomState.deformationGradient = kernel.deformationGradient();
+                atomState.interatomicDistance = kernel.interatomicDistance();
+                atomState.correspondencesCode = kernel.correspondencesCode();
+                atomState.orderingType = static_cast<int>(kernel.orderingType());
+                atomState.bestTemplateIndex = kernel.bestTemplateIndex();
                 atomState.valid = true;
             }
         }
@@ -172,7 +184,7 @@ void determineLocalStructuresWithPTM(
             context.simCell
         );
         NearestNeighborFinder diamondOrderingFinder(MAX_NEIGHBORS);
-        if(!diamondOrderingFinder.prepare(context.positions, context.simCell, context.particleSelection)){
+        if(!diamondOrderingFinder.prepare(context.positions, context.simCell)){
             throw std::runtime_error("Error trying to prepare PTM diamond ordering finder.");
         }
 
