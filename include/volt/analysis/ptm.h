@@ -127,7 +127,7 @@ public:
         }
 
         output = qb;
-        return disorientation * (180 / M_PI);
+        return disorientation * (180 / PI);
     }
 
     template <typename QuaternionType1, typename QuaternionType2>
@@ -153,7 +153,7 @@ public:
             return disorientation;
         }
 
-        return disorientation * double(180 / M_PI);
+        return disorientation * double(180 / PI);
     }
 
     void setCalculateDefGradient(bool calculateDefGradient){
