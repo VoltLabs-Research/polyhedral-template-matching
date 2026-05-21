@@ -89,9 +89,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('input_dump')
     parser.add_argument('output_base')
-    parser.add_argument('--crystalStructure', default='FCC')
+    parser.add_argument('--crystal_structure', default='FCC')
     parser.add_argument('--rmsd', type=float, default=0.1)
-    parser.add_argument('--dissolveSmallClusters', action='store_true')
+    parser.add_argument('--dissolve_small_clusters', action='store_true')
 
     args, unknown = parser.parse_known_args()
     if unknown:
@@ -123,11 +123,11 @@ def build_command(args: argparse.Namespace, runtime_paths: dict[str, Path]) -> l
         str(runtime_paths['ptm']),
         args.input_dump,
         args.output_base,
-        '--crystalStructure', normalize_structure_token(args.crystalStructure),
+        '--crystal_structure', normalize_structure_token(args.crystal_structure),
         '--rmsd', str(args.rmsd)
     ]
-    if args.dissolveSmallClusters:
-        command.append('--dissolveSmallClusters')
+    if args.dissolve_small_clusters:
+        command.append('--dissolve_small_clusters')
     return command
 
 

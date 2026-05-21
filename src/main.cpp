@@ -8,9 +8,9 @@ using namespace Volt::CLI;
 void showUsage(const std::string& name){
     printUsageHeader(name, "Volt - Polyhedral Template Matching");
     std::cerr
-        << "  --crystalStructure <type>     Crystal structure. (SC|FCC|HCP|BCC|CUBIC_DIAMOND|HEX_DIAMOND) [default: FCC]\n"
+        << "  --crystal_structure <type>     Crystal structure. (SC|FCC|HCP|BCC|CUBIC_DIAMOND|HEX_DIAMOND) [default: FCC]\n"
         << "  --rmsd <float>                RMSD threshold for PTM. [default: 0.1]\n"
-        << "  --dissolveSmallClusters       Mark small clusters as OTHER after building clusters.\n";
+        << "  --dissolve_small_clusters       Mark small clusters as OTHER after building clusters.\n";
     printHelpOption();
 }
 
@@ -31,15 +31,15 @@ int main(int argc, char* argv[]){
     spdlog::info("Output base: {}", outputBase);
 
     PolyhedralTemplateMatchingService analyzer;
-    LatticeStructureType crystalStructure = LATTICE_FCC;
-    const std::string crystalStructureOption = getString(opts, "--crystalStructure", "FCC");
-    if(!parseLatticeStructureType(crystalStructureOption, crystalStructure)){
-        spdlog::warn("Unknown crystal structure '{}', defaulting to FCC.", crystalStructureOption);
-        crystalStructure = LATTICE_FCC;
+    LatticeStructureType crystal_structure = LATTICE_FCC;
+    const std::string crystal_structureOption = getString(opts, "--crystal_structure", "FCC");
+    if(!parseLatticeStructureType(crystal_structureOption, crystal_structure)){
+        spdlog::warn("Unknown crystal structure '{}', defaulting to FCC.", crystal_structureOption);
+        crystal_structure = LATTICE_FCC;
     }
-    analyzer.setInputCrystalStructure(crystalStructure);
+    analyzer.setInputCrystalStructure(crystal_structure);
     analyzer.setRMSD(getDouble(opts, "--rmsd", 0.1));
-    analyzer.setDissolveSmallClusters(hasOption(opts, "--dissolveSmallClusters"));
+    analyzer.setDissolveSmallClusters(hasOption(opts, "--dissolve_small_clusters"));
 
     spdlog::info("Starting PTM analysis...");
     json result = analyzer.compute(frame, outputBase, filename);
