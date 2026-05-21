@@ -32,7 +32,7 @@
           "arguments": {
             "arguments": [
               {
-                "argument": "crystalStructure",
+                "argument": "crystal_structure",
                 "type": "select",
                 "label": "Crystal Structure",
                 "default": "FCC",
@@ -72,7 +72,7 @@
                 "step": 0.01
               },
               {
-                "argument": "dissolveSmallClusters",
+                "argument": "dissolve_small_clusters",
                 "type": "boolean",
                 "label": "Dissolve Small Clusters",
                 "default": false
