@@ -179,12 +179,6 @@ json PolyhedralTemplateMatchingService::compute(
 
     try{
         StructureAnalysis analysis(context);
-        // Why: always collect per-atom PTM state so the `_atoms.msgpack`
-        // exporter can surface RMSD / orientation / deformation gradient
-        // parity with OVITO's PolyhedralTemplateMatchingModifier. Previously
-        // the container was only allocated for SC input (which needs it to
-        // drive cluster building); every other crystal structure silently
-        // discarded PTM's per-atom output.
         auto ptmAtomStates = std::make_shared<std::vector<PtmLocalAtomState>>();
 
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates);
