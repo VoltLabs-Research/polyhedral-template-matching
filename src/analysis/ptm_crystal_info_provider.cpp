@@ -1,4 +1,4 @@
-#include <volt/analysis/internal/ptm_structure_analysis_detail.h>
+#include <volt/analysis/ptm_crystal_info_provider.h>
 
 #include <volt/analysis/crystal_symmetry_utils.h>
 #include <volt/analysis/ptm.h>
@@ -15,10 +15,11 @@
 #include <stdexcept>
 #include <utility>
 
-namespace Volt::PtmStructureAnalysisDetail {
-namespace {
+namespace Volt::PtmStructureAnalysisDetail{
+namespace{
 
 inline constexpr std::array<int, 6> kSimpleCubicCanonicalToTemplateSlot = {5, 4, 3, 2, 1, 0};
+inline constexpr std::array<int, 6> kSimpleCubicTemplateToCanonicalNeighborSlot = {5, 4, 3, 2, 1, 0};
 
 const Vector3& zeroVector(){
     static const Vector3 vector = Vector3::Zero();
@@ -359,11 +360,6 @@ const PtmCrystalData& emptyCrystalData(){
     return empty;
 }
 
-std::shared_ptr<const PtmCrystalInfoProvider> ptmCrystalInfoProviderImpl(){
-    static const auto provider = std::make_shared<PtmCrystalInfoProvider>();
-    return provider;
-}
-
 } // namespace
 
 PtmCrystalInfoProvider::PtmCrystalInfoProvider(){
@@ -486,6 +482,11 @@ const PtmCrystalData& PtmCrystalInfoProvider::dataFor(int structureType) const{
     }
     const auto it = _data.find(normalizedType);
     return it != _data.end() ? it->second : emptyCrystalData();
+}
+
+std::shared_ptr<const PtmCrystalInfoProvider> ptmCrystalInfoProviderImpl(){
+    static const auto provider = std::make_shared<PtmCrystalInfoProvider>();
+    return provider;
 }
 
 std::shared_ptr<const StructureAnalysisCrystalInfo> ptmCrystalInfoProvider(){

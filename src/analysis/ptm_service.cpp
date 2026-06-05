@@ -9,7 +9,7 @@
 #include <volt/core/analysis_result.h>
 #include <volt/analysis/ptm_service.h>
 #include <volt/analysis/ptm_structure_analysis.h>
-#include <volt/analysis/ptm_cluster_input_adapter.h>
+#include <volt/analysis/cluster_input_preparation.h>
 #include <volt/core/frame_adapter.h>
 #include <volt/core/particle_property.h>
 #include <volt/structures/crystal_structure_types.h>
@@ -23,7 +23,7 @@ namespace Volt{
 
 namespace{
 
-Matrix3 quaternionToMatrix(const Quaternion& orientation){
+Matrix3 quaternionToMatrix(const Quaternion& orientation){ // kept for orientation cluster rules
     const Quaternion normalized = orientation.normalized();
     return Matrix3(
         normalized * Vector3(1.0, 0.0, 0.0),
@@ -49,93 +49,6 @@ std::shared_ptr<std::vector<OrientationClusterAtomState>> buildOrientationCluste
         }
     }
     return states;
-}
-
-std::string structureTypeNameForExport(int structureType){
-    return structureTypeName(structureType);
-}
-
-json buildStructureListing(const AnalysisContext& context){
-    std::map<int, int> counts;
-    for(std::size_t atomIndex = 0; atomIndex < context.atomCount(); ++atomIndex){
-        const int structureType = context.structureTypes
-            ? context.structureTypes->getInt(atomIndex)
-            : static_cast<int>(StructureType::OTHER);
-        counts[structureType]++;
-    }
-
-    json listing = json::array();
-    for(const auto& [structureType, count] : counts){
-        if(count <= 0){
-            continue;
-        }
-        listing.push_back({
-            {"structure_id", structureType},
-            {"structure_name", structureTypeNameForExport(structureType)},
-            {"atom_count", count}
-        });
-    }
-
-    std::sort(listing.begin(), listing.end(), [](const json& lhs, const json& rhs){
-        return lhs.value("structure_name", "") < rhs.value("structure_name", "");
-    });
-
-    return listing;
-}
-
-json buildPerAtomProperties(
-    const LammpsParser::Frame& frame,
-    const StructureAnalysis& analysis,
-    const std::vector<PtmLocalAtomState>& atomStates
-){
-    const StructureContext& context = analysis.context();
-    json perAtom = json::array();
-
-    for(std::size_t atomIndex = 0; atomIndex < static_cast<std::size_t>(frame.natoms); ++atomIndex){
-        const int structureType = context.structureTypes
-            ? context.structureTypes->getInt(atomIndex)
-            : static_cast<int>(StructureType::OTHER);
-
-        json atom;
-        atom["id"] = atomIndex < frame.ids.size()
-            ? frame.ids[atomIndex]
-            : static_cast<int>(atomIndex);
-        atom["structure_type"] = structureType;
-        atom["structure_name"] = structureTypeNameForExport(structureType);
-        atom["cluster_id"] = context.atomClusters ? context.atomClusters->getInt(atomIndex) : 0;
-
-        if(atomIndex < frame.positions.size()){
-            const auto& pos = frame.positions[atomIndex];
-            atom["pos"] = {pos.x(), pos.y(), pos.z()};
-        }else{
-            atom["pos"] = {0.0, 0.0, 0.0};
-        }
-
-        if(atomIndex < atomStates.size()){
-            const PtmLocalAtomState& state = atomStates[atomIndex];
-            atom["ptm_valid"] = state.valid;
-            if(state.valid){
-                const Quaternion orientation = state.orientation.normalized();
-                atom["rmsd"] = state.rmsd;
-                atom["orientation"] = {orientation.x(), orientation.y(), orientation.z(), orientation.w()};
-                atom["interatomic_distance"] = state.interatomicDistance;
-                atom["scaling"] = state.interatomicDistance;
-                const Matrix3& F = state.deformationGradient;
-                atom["deformation_gradient"] = {
-                    F(0, 0), F(0, 1), F(0, 2),
-                    F(1, 0), F(1, 1), F(1, 2),
-                    F(2, 0), F(2, 1), F(2, 2)
-                };
-                atom["ordering_type"] = state.orderingType;
-                atom["correspondences"] = state.correspondencesCode;
-                atom["template_index"] = state.bestTemplateIndex;
-            }
-        }
-
-        perAtom.push_back(std::move(atom));
-    }
-
-    return perAtom;
 }
 
 }
@@ -183,8 +96,20 @@ json PolyhedralTemplateMatchingService::compute(
 
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates);
         computeMaximumNeighborDistanceFromPTM(analysis);
-        PTMClusterInputAdapter clusterInputAdapter;
-        clusterInputAdapter.prepare(analysis, context);
+        ClusterInputAdapterUtils::prepareSymmetryAwareClusterInputs(
+            analysis,
+            context,
+            false,
+            [&](std::size_t atomIndex, int structureType){
+                if(structureType == LATTICE_OTHER){
+                    return false;
+                }
+                if(analysis.numberOfNeighbors(static_cast<int>(atomIndex)) == 0){
+                    return false;
+                }
+                return context.atomAllowedSymmetryMasks->getInt64(atomIndex) == 0;
+            }
+        );
 
         const bool requiresScClusterRules = context.inputCrystalType == LATTICE_SC;
         if(requiresScClusterRules){
@@ -197,21 +122,19 @@ json PolyhedralTemplateMatchingService::compute(
         clusterBuilder.build(_dissolveSmallClusters);
         normalizeReconstructedClusterGraphForExport(analysis, context);
 
+        // Count structures for summary
+        std::map<int,int> structCounts;
+        for(std::size_t i = 0; i < context.atomCount(); ++i)
+            structCounts[context.structureTypes ? context.structureTypes->getInt(i) : 0]++;
+
         json result = AnalysisResult::success();
-        const json structuresListing = buildStructureListing(context);
         result["main_listing"] = {
             {"total_atoms", frame.natoms},
-            {"structure_count", static_cast<int>(structuresListing.size())},
+            {"structure_count", static_cast<int>(structCounts.size())},
             {"rmsd", _rmsd}
         };
-        result["sub_listings"] = {
-            {"structures", structuresListing}
-        };
-        result["per-atom-properties"] = buildPerAtomProperties(
-            frame,
-            analysis,
-            *ptmAtomStates
-        );
+        result["sub_listings"] = json::object();
+        result["per-atom-properties"] = json::array();
 
         if(!AnalysisPipelineUtils::appendClusterOutputs(
             frame,
@@ -232,49 +155,34 @@ json PolyhedralTemplateMatchingService::compute(
             }
 
             const std::string atomsPath = outputBase + "_atoms.msgpack";
-            // Per-atom PTM augmentation — matches OVITO's PTM Modifier
-            // output (rmsd, orientation, scaling, interatomic distance,
-            // elastic deformation gradient, correspondences code).
-            auto augmentAtom = [&ptmAtomStates](nlohmann::json& atom, std::size_t atomIndex, int /*structureType*/){
-                if(atomIndex >= ptmAtomStates->size()){
-                    return;
-                }
+            // Streaming export with PTM per-atom fields
+            auto ptmFieldWriter = [&ptmAtomStates](MsgpackWriter& w, std::size_t atomIndex, int, int& extraCount){
+                if(atomIndex >= ptmAtomStates->size()){ extraCount = 0; return; }
                 const PtmLocalAtomState& state = (*ptmAtomStates)[atomIndex];
-                atom["ptm_valid"] = state.valid;
-                if(!state.valid){
-                    return;
-                }
-                const Quaternion orientation = state.orientation.normalized();
-                atom["rmsd"] = state.rmsd;
-                atom["orientation"] = {orientation.x(), orientation.y(), orientation.z(), orientation.w()};
-                atom["interatomic_distance"] = state.interatomicDistance;
-                // Scaling is the ratio between the template-fit interatomic
-                // distance and the canonical spacing. OVITO exposes it as
-                // `Scaling` in the user properties; we expose the same here.
-                atom["scaling"] = state.interatomicDistance;
+                extraCount = state.valid ? 8 : 1;
+                w.write_key("ptm_valid"); w.write_bool(state.valid);
+                if(!state.valid) return;
+                const Quaternion q = state.orientation.normalized();
+                w.write_key("rmsd"); w.write_double(state.rmsd);
+                w.write_key("orientation");
+                w.write_array_header(4);
+                w.write_double(q.x()); w.write_double(q.y()); w.write_double(q.z()); w.write_double(q.w());
+                w.write_key("interatomic_distance"); w.write_double(state.interatomicDistance);
+                w.write_key("scaling"); w.write_double(state.interatomicDistance);
+                w.write_key("deformation_gradient");
+                w.write_array_header(9);
                 const Matrix3& F = state.deformationGradient;
-                atom["deformation_gradient"] = {
-                    F(0, 0), F(0, 1), F(0, 2),
-                    F(1, 0), F(1, 1), F(1, 2),
-                    F(2, 0), F(2, 1), F(2, 2)
-                };
-                atom["ordering_type"] = state.orderingType;
-                atom["correspondences"] = state.correspondencesCode;
-                atom["template_index"] = state.bestTemplateIndex;
+                for(int r = 0; r < 3; ++r)
+                    for(int c = 0; c < 3; ++c)
+                        w.write_double(F(r, c));
+                w.write_key("ordering_type"); w.write_int(state.orderingType);
+                w.write_key("correspondences"); w.write_uint(state.correspondencesCode);
+                w.write_key("template_index"); w.write_int(state.bestTemplateIndex);
             };
 
-            if(!JsonUtils::writeJsonMsgpackToFile(
-                StructureIdentificationExport::buildStructureIdentificationJson(
-                    frame,
-                    analysis,
-                    nullptr,
-                    augmentAtom
-                ),
-                atomsPath,
-                false
-            )){
-                return AnalysisResult::failure("Failed to write " + atomsPath);
-            }
+            StructureIdentificationExport::streamStructureIdentificationToFile(
+                atomsPath, frame, analysis, nullptr, ptmFieldWriter
+            );
         }
 
         return result;

@@ -1,12 +1,29 @@
 #pragma once
 
-#include <volt/analysis/ptm_local_atom_state.h>
 #include <volt/analysis/structure_analysis.h>
+#include <volt/math/matrix3.h>
+#include <volt/math/quaternion.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace Volt{
+
+struct PtmLocalAtomState{
+    Quaternion orientation;
+    Matrix3 deformationGradient;
+    double rmsd = 0.0;
+    double interatomicDistance = 0.0;
+    std::uint64_t correspondencesCode = 0;
+    int orderingType = 0;
+    int bestTemplateIndex = -1;
+    bool valid = false;
+
+    PtmLocalAtomState()
+        : orientation(Quaternion::Identity{})
+        , deformationGradient(Matrix3::Identity()){}
+};
 
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis);
 void determineLocalStructuresWithPTM(

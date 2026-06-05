@@ -55,8 +55,6 @@ PTM::PTM() : NearestNeighborFinder(MAX_INPUT_NEIGHBORS){
 // Collects and encodes the local neighbor shell around a particle into a bitmask.
 // This lets the PTM algorithm quickly refer back to which neighbor belong where.
 int PTM::Kernel::cacheNeighbors(size_t particleIndex, uint64_t* res){
-    //assert(particleIndex < _algorithm.particleCount());
-    
     findNeighbors(particleIndex, false);
     int numNeighbors = this->results().size();
 
@@ -77,7 +75,6 @@ bool PTM::prepare(
     size_t particleCount,
     const SimulationCell& cellData
 ){
-    //assert(positions);
     _particleCount = particleCount;
     simCell = cellData;
 
@@ -332,14 +329,11 @@ int PTM::Kernel::numTemplateNeighbors() const{
 
 // Access the raw nearest-neighbor result in sorted distance order
 const NearestNeighborFinder::Neighbor& PTM::Kernel::getNearestNeighbor(int index) const{
-    //assert(index >= 0 && index < results().size());
     return results()[index];
 }
 
 // Access the i-th neighbor after PTM has reordered them to match the template.
 const NearestNeighborFinder::Neighbor& PTM::Kernel::getTemplateNeighbor(int index) const{
-    //assert(_structureType != StructureType::OTHER);
-    //assert(index >= 0 && index < numTemplateNeighbors());
     int mappedIndex = _env.correspondences[index + 1] - 1;
     return getNearestNeighbor(mappedIndex);
 }
