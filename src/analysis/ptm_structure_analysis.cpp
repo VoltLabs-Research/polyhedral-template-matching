@@ -1,10 +1,10 @@
 #include <volt/analysis/crystal_symmetry_utils.h>
+#include <volt/analysis/ptm.h>
+#include <volt/analysis/ptm_crystal_info_provider.h>
+#include <volt/analysis/ptm_structure_analysis.h>
 #include <volt/topology/crystal_coordination_topology.h>
 #include <volt/topology/crystal_coordination_topology_init.h>
 #include <volt/analysis/nearest_neighbor_finder.h>
-
-#include <volt/analysis/internal/ptm_structure_analysis_detail.h>
-#include <volt/analysis/ptm_local_atom_state.h>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_for.h>
@@ -15,9 +15,10 @@
 #include <memory>
 #include <vector>
 
-namespace Volt::PtmStructureAnalysisDetail {
+namespace Volt{
+namespace{
 
-bool setupPTM(StructureContext& context, Volt::PTM& ptm, size_t particleCount, bool collectDefGradient){
+bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient){
     // Why: the deformation gradient is the atom-level analogue of OVITO's
     // `Particles::ElasticDeformationGradientProperty`. We ask PTM for it
     // whenever a PtmLocalAtomState container is supplied so downstream
@@ -30,9 +31,7 @@ bool setupPTM(StructureContext& context, Volt::PTM& ptm, size_t particleCount, b
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
 }
 
-} // namespace Volt::PtmStructureAnalysisDetail
-
-namespace Volt {
+} // namespace
 
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis){
     StructureContext& context = analysis.context();
@@ -102,9 +101,9 @@ void determineLocalStructuresWithPTM(
     }
     analysis.setCrystalInfoProvider(PtmStructureAnalysisDetail::ptmCrystalInfoProvider());
 
-    Volt::PTM ptm;
+    PTM ptm;
     const bool collectPerAtomState = static_cast<bool>(atomStates);
-    if(!PtmStructureAnalysisDetail::setupPTM(context, ptm, N, collectPerAtomState)){
+    if(!setupPTM(context, ptm, N, collectPerAtomState)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
 
@@ -124,6 +123,8 @@ void determineLocalStructuresWithPTM(
 
     std::vector<uint64_t> cached(N, 0ull);
     std::vector<int> localCounts(N, 0);
+    // Cache neighbor indices during the identification pass to avoid running PTM twice.
+    std::vector<std::array<int, PTM::MAX_INPUT_NEIGHBORS>> ptmNeighborIndices(N);
     std::vector<std::array<int, MAX_NEIGHBORS>> canonicalDiamondNeighbors;
     std::vector<unsigned char> canonicalDiamondShellValid;
 
@@ -150,6 +151,28 @@ void determineLocalStructuresWithPTM(
             const int neighborCount = kernel.numTemplateNeighbors();
             localCounts[i] = neighborCount;
             context.neighborCounts->setInt(i, neighborCount);
+
+            // Cache template neighbor indices with canonical slot mapping so the
+            // neighbor-index fill pass below needs no PTM recomputation.
+            bool assignedAllCanonicalSlots = true;
+            std::array<unsigned char, MAX_NEIGHBORS> slotAssigned{};
+            slotAssigned.fill(0);
+            for(int templateSlot = 0; templateSlot < neighborCount; ++templateSlot){
+                const int canonicalSlot = PtmStructureAnalysisDetail::ptmTemplateToCanonicalNeighborSlot(
+                    static_cast<int>(type), templateSlot
+                );
+                if(canonicalSlot < 0 || canonicalSlot >= neighborCount || slotAssigned[static_cast<std::size_t>(canonicalSlot)]){
+                    assignedAllCanonicalSlots = false;
+                    break;
+                }
+                ptmNeighborIndices[i][static_cast<std::size_t>(canonicalSlot)] = kernel.getTemplateNeighbor(templateSlot).index;
+                slotAssigned[static_cast<std::size_t>(canonicalSlot)] = 1;
+            }
+            if(!assignedAllCanonicalSlots){
+                for(int j = 0; j < neighborCount; ++j){
+                    ptmNeighborIndices[i][static_cast<std::size_t>(j)] = kernel.getTemplateNeighbor(j).index;
+                }
+            }
 
             if(atomStates){
                 auto& atomState = (*atomStates)[i];
@@ -253,51 +276,27 @@ void determineLocalStructuresWithPTM(
     auto* indices = context.neighborIndices->dataInt();
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
-        PTM::Kernel kernel(ptm);
-
         for(size_t i = range.begin(); i < range.end(); ++i){
             const int count = localCounts[i];
             if(count == 0){
                 continue;
             }
 
-            kernel.cacheNeighbors(i, &cached[i]);
-            kernel.identifyStructure(i, cached);
-
             const int start = offsets[i];
-
             const int structureType = context.structureTypes->getInt(i);
+
             if(
                 (structureType == StructureType::CUBIC_DIAMOND || structureType == StructureType::HEX_DIAMOND) &&
                 count == 16 &&
                 canonicalDiamondShellValid.size() == N &&
                 canonicalDiamondShellValid[i]
             ){
-                for(int neighborSlot = 0; neighborSlot < count; ++neighborSlot){
-                    indices[start + neighborSlot] = canonicalDiamondNeighbors[i][static_cast<std::size_t>(neighborSlot)];
+                for(int s = 0; s < count; ++s){
+                    indices[start + s] = canonicalDiamondNeighbors[i][static_cast<std::size_t>(s)];
                 }
-                continue;
-            }
-
-            bool assignedAllCanonicalSlots = true;
-            std::array<unsigned char, MAX_NEIGHBORS> slotAssigned{};
-            slotAssigned.fill(0);
-            for(int templateSlot = 0; templateSlot < count; ++templateSlot){
-                const int canonicalSlot = PtmStructureAnalysisDetail::ptmTemplateToCanonicalNeighborSlot(
-                    structureType,
-                    templateSlot
-                );
-                if(canonicalSlot < 0 || canonicalSlot >= count || slotAssigned[static_cast<std::size_t>(canonicalSlot)]){
-                    assignedAllCanonicalSlots = false;
-                    break;
-                }
-                indices[start + canonicalSlot] = kernel.getTemplateNeighbor(templateSlot).index;
-                slotAssigned[static_cast<std::size_t>(canonicalSlot)] = 1;
-            }
-
-            if(!assignedAllCanonicalSlots){
-                for(int j = 0; j < count; ++j){
-                    indices[start + j] = kernel.getTemplateNeighbor(j).index;
+            } else {
+                for(int s = 0; s < count; ++s){
+                    indices[start + s] = ptmNeighborIndices[i][static_cast<std::size_t>(s)];
                 }
             }
         }

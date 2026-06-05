@@ -58,7 +58,6 @@ find_package(common-neighbor-analysis REQUIRED)
 set(LIB_SOURCES
     ${CMAKE_SOURCE_DIR}/src/analysis/ptm_service.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/ptm.cpp
-    ${CMAKE_SOURCE_DIR}/src/analysis/ptm_cluster_input_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/ptm_crystal_info_provider.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/ptm_structure_analysis.cpp
 )
