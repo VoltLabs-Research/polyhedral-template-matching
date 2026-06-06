@@ -6,6 +6,9 @@
 #include <cmath> 
 #include <stdexcept>
 
+#include <tbb/blocked_range.h>
+#include <tbb/parallel_for.h>
+
 namespace Volt{
 
 StructureType PTM::ptmToStructureType(int type){
@@ -55,14 +58,14 @@ PTM::PTM() : NearestNeighborFinder(MAX_INPUT_NEIGHBORS){
 // Collects and encodes the local neighbor shell around a particle into a bitmask.
 // This lets the PTM algorithm quickly refer back to which neighbor belong where.
 int PTM::Kernel::cacheNeighbors(size_t particleIndex, uint64_t* res){
-    findNeighbors(particleIndex, false);
-    int numNeighbors = this->results().size();
+    const int numNeighbors = _algorithm.cachedNeighborCount(particleIndex);
 
     double points[PTM_MAX_INPUT_POINTS - 1][3];
     for(int i = 0; i < numNeighbors; i++){
-        points[i][0] = this->results()[i].delta.x();
-        points[i][1] = this->results()[i].delta.y();
-        points[i][2] = this->results()[i].delta.z();
+        const Vector3 delta = _algorithm.cachedNeighborDelta(particleIndex, i);
+        points[i][0] = delta.x();
+        points[i][1] = delta.y();
+        points[i][2] = delta.z();
     }
 
     return ptm_preorder_neighbours(_handle, numNeighbors, points, res);
@@ -76,6 +79,7 @@ bool PTM::prepare(
     const SimulationCell& cellData
 ){
     _particleCount = particleCount;
+    _sourcePositions = positions;
     simCell = cellData;
 
     if(simCell.volume3D() <= EPSILON){
@@ -165,13 +169,30 @@ bool PTM::prepare(
     }
 
     root->convertToAbsoluteCoordinates(simCell);
+
+    _cachedNeighborCounts.assign(particleCount, 0);
+    _cachedNeighborIndices.assign(particleCount * static_cast<size_t>(MAX_INPUT_NEIGHBORS), -1);
+
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, particleCount), [&](const tbb::blocked_range<size_t>& range){
+        NearestNeighborFinder::Query<MAX_INPUT_NEIGHBORS> query(*this);
+        for(size_t i = range.begin(); i < range.end(); ++i){
+            query.findNeighbors(i, false);
+            const int count = query.results().size();
+            _cachedNeighborCounts[i] = static_cast<std::uint8_t>(count);
+            const size_t base = i * static_cast<size_t>(MAX_INPUT_NEIGHBORS);
+            for(int neighborIndex = 0; neighborIndex < count; ++neighborIndex){
+                _cachedNeighborIndices[base + static_cast<size_t>(neighborIndex)] =
+                    static_cast<int>(query.results()[neighborIndex].index);
+            }
+        }
+    });
+
     return true;
 }
 
 // Allocates and initializes the per-thread PTM state needed by the C library
 PTM::Kernel::Kernel(const PTM& algorithm) 
-    : NeighborQuery(algorithm)
-    , _algorithm(algorithm)
+    : _algorithm(algorithm)
     , _structureType(StructureType::OTHER){
     _handle = ptm_initialize_local();
     _F.setZero();
@@ -193,13 +214,9 @@ Quaternion PTM::Kernel::orientation() const{
 }
 
 struct ptmnbrdata_t{
-    using NeighborResults = BoundedPriorityQueue<NearestNeighborFinder::Neighbor, std::less<NearestNeighborFinder::Neighbor>, PTM::MAX_INPUT_NEIGHBORS>;
-
     const PTM* neighFinder;
     const int* particleTypes;
     const std::vector<uint64_t>* cachedNeighbors;
-    size_t centralAtomIndex;
-    const NeighborResults* centralResults;
 };
 
 static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested, ptm_atomicenv_t* env){
@@ -207,15 +224,7 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
     const PTM* finder = neighborData->neighFinder;
     const int* particleTypes = neighborData->particleTypes;
     const auto& cachedNeighbors = *neighborData->cachedNeighbors;
-
-    NearestNeighborFinder::Query<PTM::MAX_INPUT_NEIGHBORS> query(*finder);
-    const bool useCentralResults = neighborData->centralResults && atomIndex == neighborData->centralAtomIndex;
-    if(!useCentralResults){
-        query.findNeighbors(atomIndex, false);
-    }
-    const auto &results = useCentralResults ? *neighborData->centralResults : query.results();
-
-    int numNeighbors = std::min(numRequested - 1, static_cast<int>(results.size()));
+    const int numNeighbors = std::min(numRequested - 1, finder->cachedNeighborCount(atomIndex));
 
     int dummy = 0;
     ptm_decode_correspondences(
@@ -235,12 +244,13 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
     // Neighbors by correpondences
     for(int i = 0; i < numNeighbors; ++i){
         int p = env->correspondences[i + 1] - 1;
-        if(p < 0 || p >= static_cast<int>(results.size())) continue;
-        const auto& nb = results[p];
-        env->atom_indices[i + 1] = nb.index;
-        env->points[i + 1][0] = nb.delta.x();
-        env->points[i + 1][1] = nb.delta.y();
-        env->points[i + 1][2] = nb.delta.z();
+        const int neighborAtomIndex = finder->cachedNeighborIndex(atomIndex, p);
+        if(neighborAtomIndex < 0) continue;
+        const Vector3 delta = finder->cachedNeighborDelta(atomIndex, p);
+        env->atom_indices[i + 1] = static_cast<size_t>(neighborAtomIndex);
+        env->points[i + 1][0] = delta.x();
+        env->points[i + 1][1] = delta.y();
+        env->points[i + 1][2] = delta.z();
     }
 
     // Types
@@ -248,8 +258,9 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
         env->numbers[0] = particleTypes[atomIndex];
         for(int i = 0; i < numNeighbors; ++i){
             int p = env->correspondences[i + 1] - 1;
-            if(p < 0 || p >= static_cast<int>(results.size())) continue;
-            env->numbers[i + 1] = particleTypes[results[p].index];
+            const int neighborAtomIndex = finder->cachedNeighborIndex(atomIndex, p);
+            if(neighborAtomIndex < 0) continue;
+            env->numbers[i + 1] = particleTypes[static_cast<size_t>(neighborAtomIndex)];
         }  
     }else{
         for(int i = 0; i < numNeighbors + 1; ++i) env->numbers[i] = 0;
@@ -260,13 +271,11 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
 }
 
 StructureType PTM::Kernel::identifyStructure(size_t particleIndex, const std::vector<uint64_t>& cachedNeighbors, Quaternion*){
-    findNeighbors(particleIndex, false); 
+    _particleIndex = particleIndex;
     ptmnbrdata_t nbrdata;
     nbrdata.neighFinder = &_algorithm; 
     nbrdata.particleTypes = _algorithm._identifyOrdering ? _algorithm._particleTypes : nullptr;
     nbrdata.cachedNeighbors = &cachedNeighbors;
-    nbrdata.centralAtomIndex = particleIndex;
-    nbrdata.centralResults = &results();
 
     const int32_t flags = PTM::supportedPtmCheckFlags();
 
@@ -327,15 +336,13 @@ int PTM::Kernel::numTemplateNeighbors() const{
     return ptm_num_nbrs[ptmType];
 }
 
-// Access the raw nearest-neighbor result in sorted distance order
-const NearestNeighborFinder::Neighbor& PTM::Kernel::getNearestNeighbor(int index) const{
-    return results()[index];
+int PTM::Kernel::getNearestNeighborIndex(int index) const{
+    return _algorithm.cachedNeighborIndex(_particleIndex, index);
 }
 
-// Access the i-th neighbor after PTM has reordered them to match the template.
-const NearestNeighborFinder::Neighbor& PTM::Kernel::getTemplateNeighbor(int index) const{
-    int mappedIndex = _env.correspondences[index + 1] - 1;
-    return getNearestNeighbor(mappedIndex);
+int PTM::Kernel::getTemplateNeighborIndex(int index) const{
+    const int mappedIndex = _env.correspondences[index + 1] - 1;
+    return getNearestNeighborIndex(mappedIndex);
 }
 
 }

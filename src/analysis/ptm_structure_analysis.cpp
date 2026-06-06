@@ -40,6 +40,12 @@ void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis){
         context.maximumNeighborDistance = 0.0;
         return;
     }
+    if(context.maximumNeighborDistance > 0.0 &&
+       context.neighborCounts &&
+       context.neighborOffsets &&
+       context.neighborIndices){
+        return;
+    }
 
     const auto* positions = context.positions->constDataPoint3();
     const auto& inverseMatrix = context.simCell.inverseMatrix();
@@ -107,24 +113,27 @@ void determineLocalStructuresWithPTM(
         throw std::runtime_error("Error trying to initialize PTM.");
     }
 
-    std::fill(context.neighborCounts->dataInt(),
-              context.neighborCounts->dataInt() + context.neighborCounts->size(), 0);
-    std::fill(context.structureTypes->dataInt(),
-              context.structureTypes->dataInt() + context.structureTypes->size(), LATTICE_OTHER);
+    auto* neighborCountsData = context.neighborCounts->dataInt();
+    auto* structureTypesData = context.structureTypes->dataInt();
+    auto* allowedSymmetryMasksData = context.atomAllowedSymmetryMasks->dataInt64();
+    std::fill(neighborCountsData,
+              neighborCountsData + context.neighborCounts->size(), 0);
+    std::fill(structureTypesData,
+              structureTypesData + context.structureTypes->size(), LATTICE_OTHER);
     std::fill(
-        context.atomAllowedSymmetryMasks->dataInt64(),
-        context.atomAllowedSymmetryMasks->dataInt64() + context.atomAllowedSymmetryMasks->size(),
+        allowedSymmetryMasksData,
+        allowedSymmetryMasksData + context.atomAllowedSymmetryMasks->size(),
         0
     );
+    context.maximumNeighborDistance = 0.0;
 
     if(atomStates){
         atomStates->assign(N, PtmLocalAtomState{});
     }
 
     std::vector<uint64_t> cached(N, 0ull);
+    std::vector<uint64_t> correspondenceCodes(N, 0ull);
     std::vector<int> localCounts(N, 0);
-    // Cache neighbor indices during the identification pass to avoid running PTM twice.
-    std::vector<std::array<int, PTM::MAX_INPUT_NEIGHBORS>> ptmNeighborIndices(N);
     std::vector<std::array<int, MAX_NEIGHBORS>> canonicalDiamondNeighbors;
     std::vector<unsigned char> canonicalDiamondShellValid;
 
@@ -138,41 +147,17 @@ void determineLocalStructuresWithPTM(
                 continue;
             }
 
-            context.structureTypes->setInt(i, type);
-            context.atomAllowedSymmetryMasks->setInt64(
-                i,
-                static_cast<std::int64_t>(
-                    AnalysisSymmetryUtils::fullSymmetryMask(
-                        PtmStructureAnalysisDetail::ptmCrystalInfoProvider()->symmetryPermutationCount(type)
-                    )
+            structureTypesData[i] = type;
+            allowedSymmetryMasksData[i] = static_cast<std::int64_t>(
+                AnalysisSymmetryUtils::fullSymmetryMask(
+                    PtmStructureAnalysisDetail::ptmCrystalInfoProvider()->symmetryPermutationCount(type)
                 )
             );
 
             const int neighborCount = kernel.numTemplateNeighbors();
             localCounts[i] = neighborCount;
-            context.neighborCounts->setInt(i, neighborCount);
-
-            // Cache template neighbor indices with canonical slot mapping so the
-            // neighbor-index fill pass below needs no PTM recomputation.
-            bool assignedAllCanonicalSlots = true;
-            std::array<unsigned char, MAX_NEIGHBORS> slotAssigned{};
-            slotAssigned.fill(0);
-            for(int templateSlot = 0; templateSlot < neighborCount; ++templateSlot){
-                const int canonicalSlot = PtmStructureAnalysisDetail::ptmTemplateToCanonicalNeighborSlot(
-                    static_cast<int>(type), templateSlot
-                );
-                if(canonicalSlot < 0 || canonicalSlot >= neighborCount || slotAssigned[static_cast<std::size_t>(canonicalSlot)]){
-                    assignedAllCanonicalSlots = false;
-                    break;
-                }
-                ptmNeighborIndices[i][static_cast<std::size_t>(canonicalSlot)] = kernel.getTemplateNeighbor(templateSlot).index;
-                slotAssigned[static_cast<std::size_t>(canonicalSlot)] = 1;
-            }
-            if(!assignedAllCanonicalSlots){
-                for(int j = 0; j < neighborCount; ++j){
-                    ptmNeighborIndices[i][static_cast<std::size_t>(j)] = kernel.getTemplateNeighbor(j).index;
-                }
-            }
+            neighborCountsData[i] = neighborCount;
+            correspondenceCodes[i] = kernel.correspondencesCode();
 
             if(atomStates){
                 auto& atomState = (*atomStates)[i];
@@ -213,7 +198,7 @@ void determineLocalStructuresWithPTM(
 
         tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
             for(size_t i = range.begin(); i < range.end(); ++i){
-                const int structureType = context.structureTypes->getInt(i);
+                const int structureType = structureTypesData[i];
                 if(
                     structureType != StructureType::CUBIC_DIAMOND &&
                     structureType != StructureType::HEX_DIAMOND
@@ -237,7 +222,7 @@ void determineLocalStructuresWithPTM(
                         (cnaOrderedType == StructureType::CUBIC_DIAMOND || cnaOrderedType == StructureType::HEX_DIAMOND)
                     ){
                         if(cnaOrderedType != structureType){
-                            context.structureTypes->setInt(i, cnaOrderedType);
+                            structureTypesData[i] = cnaOrderedType;
                         }
                         canonicalDiamondShellValid[i] = 1;
                         continue;
@@ -247,7 +232,7 @@ void determineLocalStructuresWithPTM(
         });
 
         for(size_t i = 0; i < N; ++i){
-            const int structureType = context.structureTypes->getInt(i);
+            const int structureType = structureTypesData[i];
             if(
                 structureType != StructureType::CUBIC_DIAMOND &&
                 structureType != StructureType::HEX_DIAMOND
@@ -259,8 +244,8 @@ void determineLocalStructuresWithPTM(
                 continue;
             }
 
-            context.structureTypes->setInt(i, LATTICE_OTHER);
-            context.neighborCounts->setInt(i, 0);
+            structureTypesData[i] = LATTICE_OTHER;
+            neighborCountsData[i] = 0;
             localCounts[i] = 0;
         }
     }
@@ -274,39 +259,108 @@ void determineLocalStructuresWithPTM(
     const size_t totalNeighbors = static_cast<size_t>(offsets[N]);
     context.neighborIndices = std::make_shared<ParticleProperty>(totalNeighbors, DataType::Int, 1, 0, false);
     auto* indices = context.neighborIndices->dataInt();
+    const auto* positions = context.positions->constDataPoint3();
+    const SimulationCell& simCell = context.simCell;
 
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
-        for(size_t i = range.begin(); i < range.end(); ++i){
-            const int count = localCounts[i];
-            if(count == 0){
-                continue;
+    context.maximumNeighborDistance = tbb::parallel_reduce(
+        tbb::blocked_range<size_t>(0, N),
+        0.0,
+        [&](const tbb::blocked_range<size_t>& range, double maxSoFar) -> double {
+            std::array<int8_t, PTM_MAX_INPUT_POINTS> correspondences{};
+            std::array<int, MAX_NEIGHBORS> resolvedNeighbors{};
+
+            for(size_t i = range.begin(); i < range.end(); ++i){
+                const int count = localCounts[i];
+                if(count == 0){
+                    continue;
+                }
+
+                const int start = offsets[i];
+                const int structureType = structureTypesData[i];
+                double localMaxDistance = 0.0;
+
+                if(
+                    (structureType == StructureType::CUBIC_DIAMOND || structureType == StructureType::HEX_DIAMOND) &&
+                    count == 16 &&
+                    canonicalDiamondShellValid.size() == N &&
+                    canonicalDiamondShellValid[i]
+                ){
+                    for(int s = 0; s < count; ++s){
+                        const int neighborIndex = canonicalDiamondNeighbors[i][static_cast<std::size_t>(s)];
+                        indices[start + s] = neighborIndex;
+                        if(neighborIndex >= 0){
+                            const double distance = simCell.wrapVector(
+                                positions[static_cast<size_t>(neighborIndex)] - positions[i]
+                            ).length();
+                            if(distance > localMaxDistance){
+                                localMaxDistance = distance;
+                            }
+                        }
+                    }
+                }else{
+                    resolvedNeighbors.fill(-1);
+                    bool assignedAllCanonicalSlots = true;
+                    std::array<unsigned char, MAX_NEIGHBORS> slotAssigned{};
+                    slotAssigned.fill(0);
+
+                    int decodedTemplateIndex = 0;
+                    ptm_decode_correspondences(
+                        PTM::toPtmStructureType(static_cast<StructureType>(structureType)),
+                        correspondenceCodes[i],
+                        correspondences.data(),
+                        &decodedTemplateIndex
+                    );
+
+                    for(int templateSlot = 0; templateSlot < count; ++templateSlot){
+                        const int canonicalSlot = PtmStructureAnalysisDetail::ptmTemplateToCanonicalNeighborSlot(
+                            structureType,
+                            templateSlot
+                        );
+                        const int mappedIndex = correspondences[static_cast<std::size_t>(templateSlot + 1)] - 1;
+                        const int neighborIndex = ptm.cachedNeighborIndex(i, mappedIndex);
+                        if(canonicalSlot < 0 ||
+                           canonicalSlot >= count ||
+                           slotAssigned[static_cast<std::size_t>(canonicalSlot)] ||
+                           neighborIndex < 0){
+                            assignedAllCanonicalSlots = false;
+                            break;
+                        }
+                        resolvedNeighbors[static_cast<std::size_t>(canonicalSlot)] = neighborIndex;
+                        slotAssigned[static_cast<std::size_t>(canonicalSlot)] = 1;
+                    }
+
+                    if(!assignedAllCanonicalSlots){
+                        for(int s = 0; s < count; ++s){
+                            const int mappedIndex = correspondences[static_cast<std::size_t>(s + 1)] - 1;
+                            resolvedNeighbors[static_cast<std::size_t>(s)] = ptm.cachedNeighborIndex(i, mappedIndex);
+                        }
+                    }
+
+                    for(int s = 0; s < count; ++s){
+                        const int neighborIndex = resolvedNeighbors[static_cast<std::size_t>(s)];
+                        indices[start + s] = neighborIndex;
+                        if(neighborIndex >= 0){
+                            const double distance = simCell.wrapVector(
+                                positions[static_cast<size_t>(neighborIndex)] - positions[i]
+                            ).length();
+                            if(distance > localMaxDistance){
+                                localMaxDistance = distance;
+                            }
+                        }
+                    }
+                }
+
+                if(localMaxDistance > maxSoFar){
+                    maxSoFar = localMaxDistance;
+                }
             }
 
-            const int start = offsets[i];
-            const int structureType = context.structureTypes->getInt(i);
-
-            if(
-                (structureType == StructureType::CUBIC_DIAMOND || structureType == StructureType::HEX_DIAMOND) &&
-                count == 16 &&
-                canonicalDiamondShellValid.size() == N &&
-                canonicalDiamondShellValid[i]
-            ){
-                for(int s = 0; s < count; ++s){
-                    indices[start + s] = canonicalDiamondNeighbors[i][static_cast<std::size_t>(s)];
-                }
-            } else {
-                for(int s = 0; s < count; ++s){
-                    indices[start + s] = ptmNeighborIndices[i][static_cast<std::size_t>(s)];
-                }
-            }
+            return maxSoFar;
+        },
+        [](double left, double right) -> double {
+            return std::max(left, right);
         }
-    });
-
-    for(size_t i = 0; i < N; ++i){
-        if(context.neighborCounts->getInt(i) == 0){
-            context.neighborCounts->setInt(i, localCounts[i]);
-        }
-    }
+    );
 }
 
 }

@@ -9,13 +9,13 @@
 #include <volt/core/analysis_result.h>
 #include <volt/analysis/ptm_service.h>
 #include <volt/analysis/ptm_structure_analysis.h>
-#include <volt/analysis/cluster_input_preparation.h>
 #include <volt/core/frame_adapter.h>
 #include <volt/core/particle_property.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/utilities/json_utils.h>
 
 #include <algorithm>
+#include <future>
 #include <map>
 #include <utility>
 
@@ -95,20 +95,11 @@ json PolyhedralTemplateMatchingService::compute(
         auto ptmAtomStates = std::make_shared<std::vector<PtmLocalAtomState>>();
 
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates);
-        computeMaximumNeighborDistanceFromPTM(analysis);
-        ClusterInputAdapterUtils::prepareSymmetryAwareClusterInputs(
-            analysis,
-            context,
-            false,
-            [&](std::size_t atomIndex, int structureType){
-                if(structureType == LATTICE_OTHER){
-                    return false;
-                }
-                if(analysis.numberOfNeighbors(static_cast<int>(atomIndex)) == 0){
-                    return false;
-                }
-                return context.atomAllowedSymmetryMasks->getInt64(atomIndex) == 0;
-            }
+        analysis.setClusterRuleProvider(nullptr);
+        std::fill(
+            context.atomSymmetryPermutations->dataInt(),
+            context.atomSymmetryPermutations->dataInt() + context.atomSymmetryPermutations->size(),
+            -1
         );
 
         const bool requiresScClusterRules = context.inputCrystalType == LATTICE_SC;
@@ -136,24 +127,10 @@ json PolyhedralTemplateMatchingService::compute(
         result["sub_listings"] = json::object();
         result["per-atom-properties"] = json::array();
 
-        if(!AnalysisPipelineUtils::appendClusterOutputs(
-            frame,
-            outputBase,
-            annotatedDumpPath,
-            context,
-            analysis,
-            result,
-            &frameError
-        )){
-            return AnalysisResult::failure(frameError);
-        }
+        std::future<void> atomsExportFuture;
 
         if(!outputBase.empty()){
             const std::string analysisPath = outputBase + "_ptm_analysis.msgpack";
-            if(!JsonUtils::writeJsonMsgpackToFile(result, analysisPath, false)){
-                return AnalysisResult::failure("Failed to write " + analysisPath);
-            }
-
             const std::string atomsPath = outputBase + "_atoms.msgpack";
             // Streaming export with PTM per-atom fields
             auto ptmFieldWriter = [&ptmAtomStates](MsgpackWriter& w, std::size_t atomIndex, int, int& extraCount){
@@ -179,10 +156,56 @@ json PolyhedralTemplateMatchingService::compute(
                 w.write_key("correspondences"); w.write_uint(state.correspondencesCode);
                 w.write_key("template_index"); w.write_int(state.bestTemplateIndex);
             };
+            auto ptmFieldCount = [&ptmAtomStates](std::size_t atomIndex, int) -> int {
+                if(atomIndex >= ptmAtomStates->size()){
+                    return 0;
+                }
+                return (*ptmAtomStates)[atomIndex].valid ? 8 : 1;
+            };
 
-            StructureIdentificationExport::streamStructureIdentificationToFile(
-                atomsPath, frame, analysis, nullptr, ptmFieldWriter
+            atomsExportFuture = std::async(
+                std::launch::async,
+                [&, atomsPath, ptmFieldWriter, ptmFieldCount]{
+                    StructureIdentificationExport::streamStructureIdentificationToFile(
+                        atomsPath,
+                        frame,
+                        analysis,
+                        nullptr,
+                        ptmFieldWriter,
+                        ptmFieldCount
+                    );
+                }
             );
+
+            if(!AnalysisPipelineUtils::appendClusterOutputs(
+                frame,
+                outputBase,
+                annotatedDumpPath,
+                context,
+                analysis,
+                result,
+                &frameError
+            )){
+                atomsExportFuture.wait();
+                return AnalysisResult::failure(frameError);
+            }
+
+            if(!JsonUtils::writeJsonMsgpackToFile(result, analysisPath, false)){
+                atomsExportFuture.wait();
+                return AnalysisResult::failure("Failed to write " + analysisPath);
+            }
+
+            atomsExportFuture.get();
+        }else if(!AnalysisPipelineUtils::appendClusterOutputs(
+            frame,
+            outputBase,
+            annotatedDumpPath,
+            context,
+            analysis,
+            result,
+            &frameError
+        )){
+            return AnalysisResult::failure(frameError);
         }
 
         return result;

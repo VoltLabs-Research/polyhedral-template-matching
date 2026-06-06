@@ -166,14 +166,40 @@ public:
 
     bool prepare(const Point3* positions, size_t particle_count, const SimulationCell& cell);
 
+    int cachedNeighborCount(size_t particleIndex) const{
+        return particleIndex < _cachedNeighborCounts.size()
+            ? static_cast<int>(_cachedNeighborCounts[particleIndex])
+            : 0;
+    }
+
+    int cachedNeighborIndex(size_t particleIndex, int neighborIndex) const{
+        if(particleIndex >= _cachedNeighborCounts.size() || neighborIndex < 0){
+            return -1;
+        }
+        const int count = static_cast<int>(_cachedNeighborCounts[particleIndex]);
+        if(neighborIndex >= count){
+            return -1;
+        }
+        return _cachedNeighborIndices[
+            particleIndex * static_cast<size_t>(MAX_INPUT_NEIGHBORS) + static_cast<size_t>(neighborIndex)
+        ];
+    }
+
+    Vector3 cachedNeighborDelta(size_t particleIndex, int neighborIndex) const{
+        const int neighborAtomIndex = cachedNeighborIndex(particleIndex, neighborIndex);
+        if(neighborAtomIndex < 0 || !_sourcePositions || particleIndex >= _particleCount){
+            return Vector3::Zero();
+        }
+        return simCell.wrapVector(
+            _sourcePositions[static_cast<size_t>(neighborAtomIndex)] - _sourcePositions[particleIndex]
+        );
+    }
+
     size_t particleCount() const{
         return _particleCount;
     }
 
-    class Kernel : private NearestNeighborFinder::Query<MAX_INPUT_NEIGHBORS>{
-    private:
-        using NeighborQuery = NearestNeighborFinder::Query<MAX_INPUT_NEIGHBORS>;
-
+    class Kernel{
     public:
         Kernel(const PTM& algorithm);
         ~Kernel();
@@ -209,13 +235,13 @@ public:
         }
 
         int numTemplateNeighbors() const;
-
-        const NearestNeighborFinder::Neighbor& getNearestNeighbor(int index) const;
-        const NearestNeighborFinder::Neighbor& getTemplateNeighbor(int index) const;
+        int getNearestNeighborIndex(int index) const;
+        int getTemplateNeighborIndex(int index) const;
 
     private:
         const PTM& _algorithm;
         ptm_local_handle_t _handle;
+        size_t _particleIndex = 0;
         double _rmsd;
         uint64_t _corrCode = 0;
         double _scale;
@@ -233,7 +259,10 @@ private:
     friend class Kernel;
     size_t _particleCount = 0;
     const int* _particleTypes = nullptr;
+    const Point3* _sourcePositions = nullptr;
     LatticeStructureType _inputCrystalStructure = LATTICE_OTHER;
+    std::vector<std::uint8_t> _cachedNeighborCounts;
+    std::vector<int> _cachedNeighborIndices;
 
     bool _identifyOrdering = false;
     bool _calculateDefGradient = false;
