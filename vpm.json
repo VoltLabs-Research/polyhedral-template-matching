@@ -1,6 +1,6 @@
 {
   "name": "@voltlabs/polyhedral-template-matching",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "kind": "workflow",
   "publisher": "voltlabs",
   "description": "Identifies local crystal structures using PTM, exports per-atom structure types, and generates cluster graph artifacts for OpenDXA.",
