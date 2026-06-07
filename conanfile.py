@@ -4,7 +4,7 @@ from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
 
 class PolyhedralTemplateMatchingConan(ConanFile):
     name = "polyhedral-template-matching"
-    version = "1.0.0"
+    version = "1.0.3"
     package_type = "static-library"
     license = "MIT"
     settings = "os", "arch", "compiler", "build_type"
@@ -12,7 +12,7 @@ class PolyhedralTemplateMatchingConan(ConanFile):
     requires = (
         "boost/1.88.0",
         "onetbb/2021.12.0",
-        "common-neighbor-analysis/1.0.0",
+        "common-neighbor-analysis/1.0.1",
         "coretoolkit/1.0.0",
         "structure-identification/1.0.0",
         "spdlog/1.14.1",
