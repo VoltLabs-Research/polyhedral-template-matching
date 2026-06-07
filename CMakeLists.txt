@@ -9,32 +9,10 @@ find_package(common-neighbor-analysis REQUIRED)
 
 file(GLOB PTM_VENDOR_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/dependencies/ptm/*.cpp)
 
-set(PTM_OPTIMIZED_DEPENDENCY_SOURCES
-    ${CMAKE_SOURCE_DIR}/../CoreToolkit/src/core/lammps_parser.cpp
-    ${CMAKE_SOURCE_DIR}/../StructureIdentification/src/analysis/structure_analysis_context.cpp
-    ${CMAKE_SOURCE_DIR}/../StructureIdentification/src/analysis/structure_identification_export.cpp
-)
-
-set(PTM_LOCAL_INCLUDE_DIRS
-    dependencies/ptm
-    ../CoreToolkit/include
-    ../CoreToolkit/dependencies
-    ../CoreToolkit/dependencies/fast_float
-    ../CoreToolkit/dependencies/mwm_csp
-    ../CoreToolkit/dependencies/geogram
-    ../StructureIdentification/include
-)
-
 volt_add_plugin(polyhedral-template-matching
-    SOURCES
-        src/analysis/ptm_service.cpp
-        src/analysis/ptm.cpp
-        src/analysis/ptm_crystal_info_provider.cpp
-        src/analysis/ptm_structure_analysis.cpp
-        ${PTM_OPTIMIZED_DEPENDENCY_SOURCES}
     MAIN_SOURCE src/plugin.cpp
     VENDOR_SOURCES ${PTM_VENDOR_SOURCES}
-    INCLUDE_DIRS ${PTM_LOCAL_INCLUDE_DIRS}
+    INCLUDE_DIRS dependencies/ptm
     DEPENDENCIES
         common-neighbor-analysis::common-neighbor-analysis
         structure-identification::structure-identification
