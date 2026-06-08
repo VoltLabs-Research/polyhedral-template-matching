@@ -136,7 +136,7 @@ json PolyhedralTemplateMatchingService::compute(
             auto ptmFieldWriter = [&ptmAtomStates](MsgpackWriter& w, std::size_t atomIndex, int, int& extraCount){
                 if(atomIndex >= ptmAtomStates->size()){ extraCount = 0; return; }
                 const PtmLocalAtomState& state = (*ptmAtomStates)[atomIndex];
-                extraCount = state.valid ? 8 : 1;
+                extraCount = state.valid ? 9 : 1;
                 w.write_key("ptm_valid"); w.write_bool(state.valid);
                 if(!state.valid) return;
                 const Quaternion q = state.orientation.normalized();
@@ -160,7 +160,7 @@ json PolyhedralTemplateMatchingService::compute(
                 if(atomIndex >= ptmAtomStates->size()){
                     return 0;
                 }
-                return (*ptmAtomStates)[atomIndex].valid ? 8 : 1;
+                return (*ptmAtomStates)[atomIndex].valid ? 9 : 1;
             };
 
             atomsExportFuture = std::async(
