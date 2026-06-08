@@ -15,7 +15,7 @@
             "icon": "HiCubeTransparent",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "1.0.3",
+            "version": "1.0.4",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Ejecuta PTM, exporta structure_type por atomo y genera los artefactos de cluster graph consumibles por OpenDXA."
           }
@@ -116,12 +116,10 @@
         },
         "data": {
           "entrypoint": {
-            "type": "python-script",
-            "binary": "polyhedral-template-matching-plugin.zip",
+            "type": "executable",
+            "binary": "polyhedral-template-matching",
             "binaryObjectPath": "__UPLOAD_BINARY_OBJECT_PATH__",
-            "binaryFileName": "polyhedral-template-matching-plugin.zip",
-            "entrypointScript": "scripts/ptm_plugin_wrapper.py",
-            "requirementsFile": "",
+            "binaryFileName": "polyhedral-template-matching",
             "arguments": "{{ foreach-trajectory-dumps.currentValue.path }} {{ foreach-trajectory-dumps.outputPath }} {{ plugin-arguments.as_str }}",
             "timeout": -1,
             "outputs": [
