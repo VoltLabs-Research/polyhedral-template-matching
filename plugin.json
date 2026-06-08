@@ -15,7 +15,7 @@
             "icon": "HiCubeTransparent",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "1.0.6",
+            "version": "1.0.7",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Ejecuta PTM, exporta structure_type por atomo y genera los artefactos de cluster graph consumibles por OpenDXA."
           }
