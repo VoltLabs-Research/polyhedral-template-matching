@@ -156,7 +156,7 @@
           "exposure": {
             "name": "Structure Identification",
             "icon": "HiCubeTransparent",
-            "results": "atoms.msgpack",
+            "results": "atoms.parquet",
             "iterable": ""
           }
         }
@@ -186,7 +186,7 @@
           "exposure": {
             "name": "PTM Analysis",
             "icon": "HiCube",
-            "results": "ptm_analysis.msgpack",
+            "results": "ptm_analysis.parquet",
             "iterable": "",
             "hasListing": false
           }
@@ -203,7 +203,7 @@
           "exposure": {
             "name": "Structure Counts Chart",
             "icon": "HiChartBar",
-            "results": "atoms.msgpack",
+            "results": "atoms.parquet",
             "iterable": "",
             "hasListing": false
           }
