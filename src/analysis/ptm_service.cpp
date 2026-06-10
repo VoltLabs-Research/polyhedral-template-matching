@@ -13,6 +13,7 @@
 #include <volt/core/particle_property.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/utilities/json_utils.h>
+#include <volt/utilities/parquet_atom_writer.h>
 
 #include <algorithm>
 #include <future>
@@ -130,49 +131,39 @@ json PolyhedralTemplateMatchingService::compute(
         std::future<void> atomsExportFuture;
 
         if(!outputBase.empty()){
-            const std::string analysisPath = outputBase + "_ptm_analysis.msgpack";
-            const std::string atomsPath = outputBase + "_atoms.msgpack";
-            // Streaming export with PTM per-atom fields
-            auto ptmFieldWriter = [&ptmAtomStates](MsgpackWriter& w, std::size_t atomIndex, int, int& extraCount){
-                if(atomIndex >= ptmAtomStates->size()){ extraCount = 0; return; }
+            const std::string analysisPath = outputBase + "_ptm_analysis.parquet";
+            const std::string atomsPath = outputBase + "_atoms.parquet";
+            // Streaming export with PTM per-atom columns
+            auto ptmColumnWriter = [&ptmAtomStates](ColumnarAtomWriter& w, std::size_t atomIndex, int){
+                if(atomIndex >= ptmAtomStates->size()) return;
                 const PtmLocalAtomState& state = (*ptmAtomStates)[atomIndex];
-                extraCount = state.valid ? 9 : 1;
-                w.write_key("ptm_valid"); w.write_bool(state.valid);
+                w.field("ptm_valid", state.valid);
                 if(!state.valid) return;
                 const Quaternion q = state.orientation.normalized();
-                w.write_key("rmsd"); w.write_double(state.rmsd);
-                w.write_key("orientation");
-                w.write_array_header(4);
-                w.write_double(q.x()); w.write_double(q.y()); w.write_double(q.z()); w.write_double(q.w());
-                w.write_key("interatomic_distance"); w.write_double(state.interatomicDistance);
-                w.write_key("scaling"); w.write_double(state.interatomicDistance);
-                w.write_key("deformation_gradient");
-                w.write_array_header(9);
+                w.field("rmsd", state.rmsd);
+                w.field("orientation", std::vector<double>{q.x(), q.y(), q.z(), q.w()});
+                w.field("interatomic_distance", state.interatomicDistance);
+                w.field("scaling", state.interatomicDistance);
+                std::vector<double> grad(9);
                 const Matrix3& F = state.deformationGradient;
                 for(int r = 0; r < 3; ++r)
                     for(int c = 0; c < 3; ++c)
-                        w.write_double(F(r, c));
-                w.write_key("ordering_type"); w.write_int(state.orderingType);
-                w.write_key("correspondences"); w.write_uint(state.correspondencesCode);
-                w.write_key("template_index"); w.write_int(state.bestTemplateIndex);
-            };
-            auto ptmFieldCount = [&ptmAtomStates](std::size_t atomIndex, int) -> int {
-                if(atomIndex >= ptmAtomStates->size()){
-                    return 0;
-                }
-                return (*ptmAtomStates)[atomIndex].valid ? 9 : 1;
+                        grad[r * 3 + c] = F(r, c);
+                w.field("deformation_gradient", grad);
+                w.field("ordering_type", state.orderingType);
+                w.field("correspondences", static_cast<std::int64_t>(state.correspondencesCode));
+                w.field("template_index", state.bestTemplateIndex);
             };
 
             atomsExportFuture = std::async(
                 std::launch::async,
-                [&, atomsPath, ptmFieldWriter, ptmFieldCount]{
-                    StructureIdentificationExport::streamStructureIdentificationToFile(
+                [&, atomsPath, ptmColumnWriter]{
+                    StructureIdentificationExport::streamStructureIdentificationToParquet(
                         atomsPath,
                         frame,
                         analysis,
                         nullptr,
-                        ptmFieldWriter,
-                        ptmFieldCount
+                        ptmColumnWriter
                     );
                 }
             );
@@ -190,7 +181,7 @@ json PolyhedralTemplateMatchingService::compute(
                 return AnalysisResult::failure(frameError);
             }
 
-            if(!JsonUtils::writeJsonMsgpackToFile(result, analysisPath, false)){
+            if(!JsonUtils::writeJsonToParquet(result, analysisPath, false)){
                 atomsExportFuture.wait();
                 return AnalysisResult::failure("Failed to write " + analysisPath);
             }

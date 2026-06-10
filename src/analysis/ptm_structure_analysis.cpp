@@ -22,7 +22,7 @@ bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool co
     // Why: the deformation gradient is the atom-level analogue of OVITO's
     // `Particles::ElasticDeformationGradientProperty`. We ask PTM for it
     // whenever a PtmLocalAtomState container is supplied so downstream
-    // code (atoms.msgpack exporter) can surface it. When no state
+    // code (atoms.parquet exporter) can surface it. When no state
     // container is requested (e.g. cluster-only passes from internal
     // helpers) we keep the cheaper path that skips the 3x3 matrix.
     ptm.setCalculateDefGradient(collectDefGradient);
