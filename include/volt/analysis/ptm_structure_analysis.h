@@ -10,6 +10,8 @@
 
 namespace Volt{
 
+class TemplateMatcher;
+
 struct PtmLocalAtomState{
     Quaternion orientation;
     Matrix3 deformationGradient;
@@ -29,7 +31,9 @@ void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis);
 void determineLocalStructuresWithPTM(
     StructureAnalysis& analysis,
     double rmsdCutoff,
-    std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates = nullptr
+    std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates = nullptr,
+    const TemplateMatcher* templates = nullptr,
+    double cationNeighborRadius = 0.0
 );
 
 }
