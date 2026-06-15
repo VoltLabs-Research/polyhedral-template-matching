@@ -3,6 +3,7 @@
 #include <volt/analysis/ptm_crystal_info_provider.h>
 #include <volt/analysis/ptm_structure_analysis.h>
 #include <volt/topology/crystal_coordination_topology.h>
+#include <volt/matcher/template_matcher.h>
 #include <volt/topology/crystal_coordination_topology_init.h>
 #include <volt/analysis/nearest_neighbor_finder.h>
 
@@ -98,7 +99,9 @@ void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis){
 void determineLocalStructuresWithPTM(
     StructureAnalysis& analysis,
     double rmsdCutoff,
-    std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates
+    std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates,
+    const TemplateMatcher* templates,
+    double cationNeighborRadius
 ) {
     StructureContext& context = analysis.context();
     const size_t N = context.atomCount();
@@ -137,15 +140,70 @@ void determineLocalStructuresWithPTM(
     std::vector<std::array<int, MAX_NEIGHBORS>> canonicalDiamondNeighbors;
     std::vector<unsigned char> canonicalDiamondShellValid;
 
+    const bool buildCationNetwork = (templates != nullptr && !templates->empty() && cationNeighborRadius > 0.0);
+    std::vector<std::array<int, MAX_NEIGHBORS>> cationNeighbors;
+
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
         PTM::Kernel kernel(ptm);
+        double env[PTM_MAX_INPUT_POINTS][3];
 
         for(size_t i = range.begin(); i < range.end(); ++i){
             kernel.cacheNeighbors(i, &cached[i]);
             StructureType type = kernel.identifyStructure(i, cached);
-            if(type == StructureType::OTHER || kernel.rmsd() > rmsdCutoff){
+
+            const bool builtinMatched = (type != StructureType::OTHER && kernel.rmsd() <= rmsdCutoff);
+            double bestRmsd = builtinMatched ? kernel.rmsd() : std::numeric_limits<double>::infinity();
+            
+            int definedType = -1;
+            TemplateMatch templateMatch;
+            if(templates && !templates->empty()){
+                const int envNbrs = std::min(ptm.cachedNeighborCount(i), PTM_MAX_INPUT_POINTS - 1);
+                env[0][0] = env[0][1] = env[0][2] = 0.0;
+                for(int n = 0; n < envNbrs; n++){
+                    const Vector3 delta = ptm.cachedNeighborDelta(i, n);
+                    env[n + 1][0] = delta.x();
+                    env[n + 1][1] = delta.y();
+                    env[n + 1][2] = delta.z();
+                }
+
+                int candidateType = -1;
+                TemplateMatch match = templates->matchBest(env, envNbrs + 1, &candidateType);
+                if(match.topologicalMatch && candidateType >= 0 && match.rmsd <= rmsdCutoff && match.rmsd < bestRmsd){
+                    definedType = candidateType;
+                    templateMatch = match;
+                    bestRmsd = match.rmsd; 
+                }
+            }
+
+            if(definedType > 0){
+                // A defined template is the best fit for this atom
+                structureTypesData[i] = definedType;
+                allowedSymmetryMasksData[i] = buildCationNetwork
+                    ? static_cast<std::int64_t>(AnalysisSymmetryUtils::fullSymmetryMask(1))
+                    : 0;
+                
+                // Cation-cation neighbours are resolved later;
+                // the built-in correspondence machinery does not apply.
+                localCounts[i] = 0;
+                neighborCountsData[i] = 0;
+                correspondenceCodes[i] = 0;
+
+                if(atomStates){
+                    auto& atomState = (*atomStates)[i];
+                    atomState.orientation = templateMatch.orientation.normalized();
+                    atomState.rmsd = templateMatch.rmsd;
+                    atomState.deformationGradient = Matrix3::Identity();
+                    atomState.interatomicDistance = (templateMatch.scale != 0.0) ? 1.0 / templateMatch.scale : 0.0;
+                    atomState.correspondencesCode = 0;
+                    atomState.orderingType = static_cast<int>(PTM::OrderingType::ORDERING_NONE);
+                    atomState.bestTemplateIndex = 0;
+                    atomState.valid = true;
+                }
+
                 continue;
             }
+
+            if(!builtinMatched) continue;
 
             structureTypesData[i] = type;
             allowedSymmetryMasksData[i] = static_cast<std::int64_t>(
@@ -250,6 +308,49 @@ void determineLocalStructuresWithPTM(
         }
     }
 
+    if(buildCationNetwork){
+        cationNeighbors.assign(N, std::array<int, MAX_NEIGHBORS>{});
+        for(auto& row : cationNeighbors){
+            row.fill(-1);
+        }
+
+        const double radiusSq = cationNeighborRadius * cationNeighborRadius;
+        static constexpr int kCationCapacity = 64;
+        NearestNeighborFinder cationFinder(kCationCapacity);
+        if(!cationFinder.prepare(context.positions, context.simCell)){
+            throw std::runtime_error("Error preparing cation-network neighbour finder.");
+        }
+        
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto &range){
+            NearestNeighborFinder::Query<kCationCapacity> query(cationFinder);
+            for(size_t i = range.begin(); i < range.end(); i++){
+                const int type = structureTypesData[i];
+                if(type < TEMPLATE_STRUCTURE_TYPE_BASE) continue;
+
+                query.findNeighbors(i, false);
+                const auto& results = query.results();
+                int count = 0;
+
+                for(int n = 0; n < results.size() && count < MAX_NEIGHBORS; n++){
+                    const auto &nb = results[n];
+                    if(nb.distanceSq > radiusSq) continue;
+                    const size_t j = nb.index;
+
+                    if(j == i) continue;    
+
+                    // Only same template type forms the subnetwork
+                    if(structureTypesData[j] != type) continue;
+
+                    cationNeighbors[i][static_cast<std::size_t>(count)] = static_cast<int>(j);
+                    count++;
+                }
+
+                localCounts[i] = count;
+                neighborCountsData[i] = count;
+            }
+        });
+    }
+
     auto* offsets = context.neighborOffsets->dataInt();
     offsets[0] = 0;
     for(size_t i = 0; i < N; ++i){
@@ -279,7 +380,21 @@ void determineLocalStructuresWithPTM(
                 const int structureType = structureTypesData[i];
                 double localMaxDistance = 0.0;
 
-                if(
+                if(structureType >= TEMPLATE_STRUCTURE_TYPE_BASE){
+                    for(int s = 0; s < count; s++){
+                        const int neighborIndex = cationNeighbors[i][static_cast<std::size_t>(s)];
+                        indices[start + s] = neighborIndex;
+                        if(neighborIndex >= 0){
+                            const double distance = simCell.wrapVector(
+                                positions[static_cast<size_t>(neighborIndex)] - positions[i]
+                            ).length();
+
+                            if(distance > localMaxDistance){
+                                localMaxDistance = distance;
+                            }
+                        }
+                    }
+                }else if(
                     (structureType == StructureType::CUBIC_DIAMOND || structureType == StructureType::HEX_DIAMOND) &&
                     count == 16 &&
                     canonicalDiamondShellValid.size() == N &&
