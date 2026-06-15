@@ -105,28 +105,20 @@ public:
         const Quaternion& qb,
         Quaternion &output
     ){
+        double disorientation = std::numeric_limits<double>::infinity();
         double orientA[4] = { qa.w(), qa.x(), qa.y(), qa.z() };
         double orientB[4] = { qb.w(), qb.x(), qb.y(), qb.z() };
-        double disorientation = std::numeric_limits<double>::infinity();
 
-        const bool cubicA = isCubicLike(structureTypeA);
-        const bool cubicB = isCubicLike(structureTypeB);
-        const bool hexA = isHexagonalLike(structureTypeA);
-        const bool hexB = isHexagonalLike(structureTypeB);
-
-        if((cubicA && cubicB) || (hexA && hexB)){
-            if(cubicA){
-                disorientation = static_cast<double>(ptm::quat_disorientation_cubic(orientA, orientB));
-            }else if(hexA){
-                disorientation = static_cast<double>(ptm::quat_disorientation_hcp_conventional(orientA, orientB));
-            }
-        }else if(cubicA && hexB){
-            disorientation = static_cast<double>(ptm::quat_disorientation_cubic_to_hexagonal(orientA, orientB));
-        }else if(hexA && cubicB){
+        if(structureTypeA == StructureType::FCC || structureTypeA == StructureType::CUBIC_DIAMOND){
             disorientation = static_cast<double>(ptm::quat_disorientation_hexagonal_to_cubic(orientA, orientB));
+        }else{
+            disorientation = static_cast<double>(ptm::quat_disorientation_cubic_to_hexagonal(orientA, orientB));
         }
 
-        output = qb;
+        output.w() = orientB[0];
+        output.x() = orientB[1];
+        output.y() = orientB[2];
+        output.z() = orientB[3];
         return disorientation * (180 / PI);
     }
 
