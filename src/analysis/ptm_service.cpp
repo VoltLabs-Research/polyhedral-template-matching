@@ -232,26 +232,19 @@ json PolyhedralTemplateMatchingService::compute(
                     return;
                 }
                 const PtmLocalAtomState& state = (*ptmAtomStates)[atomIndex];
-                writer.field("ptm_valid", state.valid);
                 if(!state.valid){
                     return;
                 }
+                // atoms.parquet carries only display-relevant per-atom data: structure
+                // (via structure_id/name), rmsd, orientation, interatomic distance,
+                // correspondences. scaling/deformation_gradient/ordering_type/
+                // template_index are dropped; neighbor topology lives in the
+                // _neighbor_lattice.parquet sidecar.
                 const Quaternion orientation = state.orientation.normalized();
                 writer.field("rmsd", state.rmsd);
                 writer.field("orientation", std::vector<double>{orientation.x(), orientation.y(), orientation.z(), orientation.w()});
                 writer.field("interatomic_distance", state.interatomicDistance);
-                writer.field("scaling", state.interatomicDistance);
-                std::vector<double> deformationGradient(9);
-                const Matrix3& gradient = state.deformationGradient;
-                for(int row = 0; row < 3; ++row){
-                    for(int column = 0; column < 3; ++column){
-                        deformationGradient[row * 3 + column] = gradient(row, column);
-                    }
-                }
-                writer.field("deformation_gradient", deformationGradient);
-                writer.field("ordering_type", state.orderingType);
                 writer.field("correspondences", static_cast<std::int64_t>(state.correspondencesCode));
-                writer.field("template_index", state.bestTemplateIndex);
             };
 
             StructureIdentificationExport::StructureNameResolver nameResolver =

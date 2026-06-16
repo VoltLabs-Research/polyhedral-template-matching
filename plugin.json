@@ -15,7 +15,7 @@
             "icon": "HiCubeTransparent",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "2.0.1",
+            "version": "2.0.2",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Ejecuta PTM, exporta structure_type por atomo y genera los artefactos de cluster graph consumibles por OpenDXA."
           }
@@ -285,6 +285,23 @@
             "hasListing": false
           }
         }
+      },
+      {
+        "id": "neighbor-lattice-exposure",
+        "type": "exposure",
+        "position": {
+          "x": 1712,
+          "y": 976
+        },
+        "data": {
+          "exposure": {
+            "name": "Neighbor Lattice",
+            "icon": "HiTable",
+            "id": "neighbor_lattice",
+            "results": "neighbor_lattice.parquet",
+            "hasListing": false
+          }
+        }
       }
     ],
     "edges": [
@@ -370,6 +387,13 @@
         "source": "analysis-entrypoint",
         "sourceHandle": "output",
         "target": "per-atom-properties-exposure",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-analysis-entrypoint-neighbor-lattice-exposure",
+        "source": "analysis-entrypoint",
+        "sourceHandle": "output",
+        "target": "neighbor-lattice-exposure",
         "targetHandle": "input"
       }
     ]
