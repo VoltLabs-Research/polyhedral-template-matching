@@ -1,28 +1,39 @@
-# PolyhedralTemplateMatching
+# Polyhedral Template Matching
 
-`PolyhedralTemplateMatching` classifies atoms using PTM and exports the reconstructed state consumed by downstream DXA-compatible tools.
+Runs PTM, exports the per-atom structure type, and generates the cluster-graph artifacts consumed by OpenDXA.
 
-## One-Command Install
+## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/VoltLabs-Research/CoreToolkit/main/scripts/install-plugin.sh | bash -s -- PolyhedralTemplateMatching
+vpm install @voltlabs/polyhedral-template-matching
 ```
 
 ## CLI
 
-Usage:
-
 ```bash
-polyhedral-template-matching <lammps_file> [output_base] [options]
+polyhedral-template-matching <input_dump> [output_base] [options]
 ```
 
-### Arguments
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `<input_dump>` | yes | — | Input LAMMPS dump. |
+| `[output_base]` | no | derived from input | Base path for output files. |
+| `--crystal_structure <type>` | no | `FCC` | Input crystal structure: `SC`, `FCC`, `HCP`, `BCC`, `CUBIC_DIAMOND`, `HEX_DIAMOND`. |
+| `--rmsd <float>` | no | `0.1` | RMSD threshold for PTM (min `0`). |
+| `--dissolve_small_clusters` | no | `false` | Mark small clusters as `OTHER` after clustering. |
 
-| Argument | Required | Description | Default |
-| --- | --- | --- | --- |
-| `<lammps_file>` | Yes | Input LAMMPS dump file. | |
-| `[output_base]` | No | Base path for output files. | derived from input |
-| `--crystal_structure <type>` | No | Input crystal structure: `SC`, `FCC`, `HCP`, `BCC`, `CUBIC_DIAMOND`, `HEX_DIAMOND`. | `FCC` |
-| `--rmsd <float>` | No | RMSD threshold for PTM. | `0.1` |
-| `--dissolve_small_clusters` | No | Mark small clusters as `OTHER` after clustering. | `false` |
-| `--help` | No | Print CLI help. | |
+## Exports
+
+| Output file | Exposure | Exporter → artifact |
+|---|---|---|
+| `{output_base}_atoms.parquet` | Structure Identification | AtomisticExporter → glb |
+| `{output_base}_atoms.parquet` | Structure Counts Chart | ChartExporter → chart-png |
+| `{output_base}_ptm_analysis.parquet` | PTM Analysis | — |
+| `{output_base}_clusters.table` | Clusters Table | — |
+| `{output_base}_cluster_transitions.table` | Clusters Transitions | — |
+| `{output_base}_atoms.parquet` | Per Atom Properties | — |
+| `{output_base}_neighbor_lattice.parquet` | Neighbor Lattice | — |
+
+---
+
+Full input contract and examples: https://docs.voltcloud.dev/docs/plugins/polyhedral-template-matching
