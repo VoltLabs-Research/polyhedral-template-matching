@@ -43,9 +43,40 @@ static double norm_squared(double* x)
     return x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
 }
 
-//todo: change voronoi code to return errors rather than exiting
-static int calculate_voronoi_face_areas(int num_points, const double (*_points)[3], double* normsq, double max_norm, ptm_voro::voronoicell_neighbor* v, std::vector<int>& nbr_indices, std::vector<double>& face_areas)
+// Per-thread scratch for the Voronoi ordering.
+//
+// This used to construct four std::vectors per atom (nbr_indices, face_areas,
+// face_vertices, vertices) inside a loop that runs once for every atom in the
+// frame, at roughly 2 us/atom. The vectors are all small and their sizes are
+// bounded by PTM_MAX_INPUT_POINTS, so hoisting them into the existing per-thread
+// handle removes the allocator from the hot path entirely. clear() keeps the
+// capacity, so after the first atom every reuse is allocation-free.
+namespace {
+struct voronoi_scratch_t
 {
+    ptm_voro::voronoicell_neighbor cell;
+    std::vector<int> nbr_indices;
+    std::vector<double> face_areas;
+    std::vector<int> face_vertices;
+    std::vector<double> vertices;
+
+    voronoi_scratch_t()
+    {
+        // Voro++ reports one entry per face; the cell starts as a box (6 faces)
+        // and each nplane() call can add one, so num_points + 6 is the bound the
+        // original code already used.
+        nbr_indices.reserve(PTM_MAX_INPUT_POINTS + 6);
+        face_areas.reserve(PTM_MAX_INPUT_POINTS + 6);
+        face_vertices.reserve(8 * (PTM_MAX_INPUT_POINTS + 6));
+        vertices.reserve(3 * 4 * (PTM_MAX_INPUT_POINTS + 6));
+    }
+};
+}
+
+//todo: change voronoi code to return errors rather than exiting
+static int calculate_voronoi_face_areas(int num_points, const double (*_points)[3], double* normsq, double max_norm, voronoi_scratch_t* scratch, std::vector<int>& nbr_indices, std::vector<double>& face_areas)
+{
+    ptm_voro::voronoicell_neighbor* v = &scratch->cell;
     const double k = 10 * max_norm;
     v->init(-k, k, -k, k, -k, k);
 
@@ -59,8 +90,8 @@ static int calculate_voronoi_face_areas(int num_points, const double (*_points)[
 
     v->neighbors(nbr_indices);
 
-    std::vector<int> face_vertices;
-    std::vector<double> vertices;
+    std::vector<int>& face_vertices = scratch->face_vertices;
+    std::vector<double>& vertices = scratch->vertices;
 
     v->face_vertices(face_vertices);
     v->vertices(0, 0, 0, vertices);
@@ -110,7 +141,7 @@ static int calculate_neighbour_ordering(void* _voronoi_handle, int num, double (
 {
     assert(num <= PTM_MAX_INPUT_POINTS);
 
-    ptm_voro::voronoicell_neighbor* voronoi_handle = (ptm_voro::voronoicell_neighbor*)_voronoi_handle;
+    voronoi_scratch_t* scratch = (voronoi_scratch_t*)_voronoi_handle;
 
     double max_norm = 0;
     double points[PTM_MAX_INPUT_POINTS][3];
@@ -124,9 +155,14 @@ static int calculate_neighbour_ordering(void* _voronoi_handle, int num, double (
     }
     max_norm = sqrt(max_norm);
 
-    std::vector<int> nbr_indices(num + 6);
-    std::vector<double> face_areas(num + 6);
-    int ret = calculate_voronoi_face_areas(num, points, normsq, max_norm, voronoi_handle, nbr_indices, face_areas);
+    // Reused across atoms; assign() restores the old value-initialised contents
+    // without releasing the buffer.
+    std::vector<int>& nbr_indices = scratch->nbr_indices;
+    std::vector<double>& face_areas = scratch->face_areas;
+    nbr_indices.assign(num + 6, 0);
+    face_areas.assign(num + 6, 0.0);
+
+    int ret = calculate_voronoi_face_areas(num, points, normsq, max_norm, scratch, nbr_indices, face_areas);
     if (ret != 0)
         return ret;
 
@@ -152,13 +188,13 @@ static int calculate_neighbour_ordering(void* _voronoi_handle, int num, double (
 
 void* voronoi_initialize_local()
 {
-    ptm_voro::voronoicell_neighbor* ptr = new ptm_voro::voronoicell_neighbor;
+    voronoi_scratch_t* ptr = new voronoi_scratch_t;
     return (void*)ptr;
 }
 
 void voronoi_uninitialize_local(void* _ptr)
 {
-    ptm_voro::voronoicell_neighbor* ptr = (ptm_voro::voronoicell_neighbor*)_ptr;
+    voronoi_scratch_t* ptr = (voronoi_scratch_t*)_ptr;
     delete ptr;
 }
 

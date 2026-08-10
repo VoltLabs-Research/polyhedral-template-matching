@@ -74,9 +74,45 @@ static void check_graphs(    const refdata_t* s,
     }
     double E0 = (G1 + G2) / 2;
 
-    for (int i = 0;i<s->num_graphs;i++)
+    // Binary-search the sorted (hash, graph_index) index instead of scanning all
+    // num_graphs entries of the ~128-byte graph_t table. Falls back to the linear
+    // scan if the index is missing, so the matcher still works if it is ever
+    // called before ptm_initialize_global() has built it.
+    const graph_hash_entry_t* index = (s->type >= 0 && s->type <= 8)
+                                          ? graph_hash_index[s->type]
+                                          : NULL;
+    const int index_size = (s->type >= 0 && s->type <= 8)
+                               ? graph_hash_index_size[s->type]
+                               : 0;
+
+    int scan_begin = 0;
+    int scan_end = s->num_graphs;
+    if (index != NULL && index_size == s->num_graphs)
     {
-        if (hash != s->graphs[i].hash)
+        // lower_bound on hash
+        int lo = 0, hi = index_size;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (index[mid].hash < hash)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        scan_begin = lo;
+        scan_end = lo;
+        while (scan_end < index_size && index[scan_end].hash == hash)
+            scan_end++;
+    }
+    else
+    {
+        index = NULL;
+    }
+
+    for (int it = scan_begin; it < scan_end; it++)
+    {
+        const int i = (index != NULL) ? index[it].graph_index : it;
+        if (index == NULL && hash != s->graphs[i].hash)
             continue;
 
         graph_t* gref = &s->graphs[i];

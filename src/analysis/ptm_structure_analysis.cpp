@@ -19,7 +19,8 @@
 namespace Volt{
 namespace{
 
-bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient){
+bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient,
+              int structureCheckFlags){
     // Why: the deformation gradient is the atom-level analogue of OVITO's
     // `Particles::ElasticDeformationGradientProperty`. We ask PTM for it
     // whenever a PtmLocalAtomState container is supplied so downstream
@@ -29,6 +30,8 @@ bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool co
     ptm.setCalculateDefGradient(collectDefGradient);
     ptm.setRmsdCutoff(std::numeric_limits<double>::infinity());
     ptm.setInputCrystalStructure(context.inputCrystalType);
+    // 0 leaves PTM deriving the search set from the input crystal structure.
+    ptm.setStructureCheckFlags(structureCheckFlags);
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
 }
 
@@ -101,7 +104,8 @@ void determineLocalStructuresWithPTM(
     double rmsdCutoff,
     std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates,
     const TemplateMatcher* templates,
-    double cationNeighborRadius
+    double cationNeighborRadius,
+    int structureCheckFlags
 ) {
     StructureContext& context = analysis.context();
     const size_t N = context.atomCount();
@@ -112,9 +116,11 @@ void determineLocalStructuresWithPTM(
 
     PTM ptm;
     const bool collectPerAtomState = static_cast<bool>(atomStates);
-    if(!setupPTM(context, ptm, N, collectPerAtomState)){
+    if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
+    spdlog::debug("PTM: searching structure families 0x{:x} (input lattice {})",
+                  ptm.ptmCheckFlags(), latticeStructureTypeName(context.inputCrystalType));
 
     auto* neighborCountsData = context.neighborCounts->dataInt();
     auto* structureTypesData = context.structureTypes->dataInt();

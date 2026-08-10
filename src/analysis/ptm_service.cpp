@@ -7,6 +7,7 @@
 #include <volt/analysis/structure_analysis.h>
 #include <volt/analysis/structure_identification_export.h>
 #include <volt/analysis/ptm_service.h>
+#include <volt/analysis/ptm.h>
 #include <volt/analysis/ptm_structure_analysis.h>
 #include <volt/analysis/ptm_crystal_info_provider.h>
 #include <volt/matcher/template_matcher.h>
@@ -19,6 +20,10 @@
 #include <volt/core/particle_property.h>
 
 #include <volt/structures/crystal_structure_types.h>
+
+#include <cctype>
+#include <string_view>
+#include <utility>
 
 #include <volt/utilities/json_utils.h>
 #include <volt/utilities/parquet_atom_writer.h>
@@ -72,7 +77,57 @@ PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
     , _dissolveSmallClusters(false)
     , _latticeDirectory()
     , _cationNeighborRadius(0.0)
-    , _cationMisorientation(12.0){}
+    , _cationMisorientation(12.0)
+    , _structureCheckFlags(0){}
+
+void PolyhedralTemplateMatchingService::setStructureCheckFlags(std::string families){
+    _structureCheckFlags = 0;
+    if(families.empty()){
+        return;    // derive from --crystal_structure
+    }
+
+    static const std::pair<std::string_view, int> table[] = {
+        {"SC", PTM_CHECK_SC},       {"FCC", PTM_CHECK_FCC},
+        {"HCP", PTM_CHECK_HCP},     {"ICO", PTM_CHECK_ICO},
+        {"BCC", PTM_CHECK_BCC},     {"DCUB", PTM_CHECK_DCUB},
+        {"DHEX", PTM_CHECK_DHEX},   {"GRAPHENE", PTM_CHECK_GRAPHENE},
+        {"ALL", PTM_CHECK_ALL},
+    };
+
+    int flags = 0;
+    std::size_t start = 0;
+    while(start <= families.size()){
+        std::size_t comma = families.find(',', start);
+        if(comma == std::string::npos){
+            comma = families.size();
+        }
+        std::string token = families.substr(start, comma - start);
+        // trim and upcase
+        token.erase(0, token.find_first_not_of(" \t"));
+        const auto lastChar = token.find_last_not_of(" \t");
+        token.erase(lastChar == std::string::npos ? 0 : lastChar + 1);
+        for(char& c : token){
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+
+        if(!token.empty()){
+            bool matched = false;
+            for(const auto& [name, bit] : table){
+                if(token == name){
+                    flags |= bit;
+                    matched = true;
+                    break;
+                }
+            }
+            if(!matched){
+                spdlog::warn("PTM: unknown structure family '{}' in --ptm_structures, ignoring", token);
+            }
+        }
+        start = comma + 1;
+    }
+
+    _structureCheckFlags = flags;
+}
 
 void PolyhedralTemplateMatchingService::setInputCrystalStructure(LatticeStructureType structureType){
     _inputCrystalStructure = structureType;
@@ -134,7 +189,8 @@ json PolyhedralTemplateMatchingService::compute(
         const bool clusterTemplates = (templatesPtr != nullptr && _cationNeighborRadius > 0.0);
         const double cationRadius = clusterTemplates ? _cationNeighborRadius : 0.0;
 
-        determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius);
+        determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
+                                        _structureCheckFlags);
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),

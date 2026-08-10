@@ -12,6 +12,10 @@ static const std::vector<OptionBinding<S>> bindings = {
     opt("--lattices", "Directory of user-defined lattice template YAML files (cell+basis+coordination_number)", "", &S::setLatticesDirectory),
     opt("--cation_radius", "Cation-cation search radius (A) to grow orientation grains over user templates; 0 disables", 0.0, &S::setCationNeighborRadius),
     opt("--cation_misorientation", "Misorientation tolerance (deg) for joining cations into one grain", 12.0, &S::setCationMisorientation),
+    // Pass the default as a const char*, not std::string: that selects the dedicated
+    // string overload of opt(). std::string binds to the generic template instead,
+    // which has no branch for it.
+    opt("--ptm_structures", "Structure families to search, comma-separated (SC,FCC,HCP,ICO,BCC,DCUB,DHEX,GRAPHENE,ALL). Empty derives them from --crystal_structure", "", &S::setStructureCheckFlags),
 };
 
 VOLT_SERVICE_PLUGIN("volt-polyhedral-template-matching", "Polyhedral Template Matching", S, bindings)

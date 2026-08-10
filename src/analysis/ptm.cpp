@@ -277,7 +277,9 @@ StructureType PTM::Kernel::identifyStructure(size_t particleIndex, const std::ve
     nbrdata.particleTypes = _algorithm._identifyOrdering ? _algorithm._particleTypes : nullptr;
     nbrdata.cachedNeighbors = &cachedNeighbors;
 
-    const int32_t flags = PTM::supportedPtmCheckFlags();
+    // Only the structure families this run can plausibly contain; searching for
+    // diamond and graphene in a metal costs ~2.2x for no information gained.
+    const int32_t flags = _algorithm.ptmCheckFlags();
 
     ptm_result_t result;
     int errorCode = ptm_index(
