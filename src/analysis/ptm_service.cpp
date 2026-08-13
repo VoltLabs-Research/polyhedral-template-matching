@@ -262,7 +262,26 @@ json PolyhedralTemplateMatchingService::compute(
             {"structure_count", static_cast<int>(structureCounts.size())},
             {"rmsd", _rmsd}
         };
+
+        // The per-structure tally, published rather than dropped. This is the table
+        // OVITO shows as "Structure analysis results" next to the modifier: one row per
+        // structure type with its count and share of the total. The name is the same
+        // string the atoms carry as `structure_name`, which is how a viewer can match a
+        // row to the colour the plugin declared for that category.
+        json structureCountRows = json::array();
+        const double totalAtomsForFraction = context.atomCount() > 0
+            ? static_cast<double>(context.atomCount()) : 1.0;
+        for(const auto& [structureType, count] : structureCounts){
+            structureCountRows.push_back({
+                {"structure_id", structureType},
+                {"structure_name", structureTypeName(structureType)},
+                {"count", static_cast<int64_t>(count)},
+                {"fraction", static_cast<double>(count) / totalAtomsForFraction}
+            });
+        }
+
         result["sub_listings"] = json::object();
+        result["sub_listings"]["structure_counts"] = std::move(structureCountRows);
         result["per-atom-properties"] = json::array();
 
         std::vector<AnalysisContext::ExtraScalarColumn> extraDumpColumns;

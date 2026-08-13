@@ -15,7 +15,7 @@
             "icon": "HiCubeTransparent",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "2.0.5",
+            "version": "2.1.0",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Ejecuta PTM, exporta structure_type por atomo y genera los artefactos de cluster graph consumibles por OpenDXA."
           }
@@ -151,7 +151,65 @@
         "data": {
           "export": {
             "exporter": "AtomisticExporter",
-            "type": "glb"
+            "type": "glb",
+            "options": {
+              "propertyColors": {
+                "OTHER": [
+                  0.949,
+                  0.949,
+                  0.949,
+                  1
+                ],
+                "FCC": [
+                  0.4,
+                  1,
+                  0.4,
+                  1
+                ],
+                "HCP": [
+                  1,
+                  0.4,
+                  0.4,
+                  1
+                ],
+                "BCC": [
+                  0.4,
+                  0.4,
+                  1,
+                  1
+                ],
+                "ICO": [
+                  1,
+                  0.6471,
+                  0,
+                  1
+                ],
+                "SC": [
+                  0.6275,
+                  0.0784,
+                  0.9961,
+                  1
+                ],
+                "CUBIC_DIAMOND": [
+                  0.0745,
+                  0.6275,
+                  0.9961,
+                  1
+                ],
+                "HEX_DIAMOND": [
+                  0.9961,
+                  0.5373,
+                  0,
+                  1
+                ],
+                "GRAPHENE": [
+                  0.1961,
+                  0.8039,
+                  0.1961,
+                  1
+                ]
+              }
+            }
           }
         }
       },
@@ -167,8 +225,7 @@
             "name": "PTM Analysis",
             "icon": "HiCube",
             "results": "ptm_analysis.parquet",
-            "iterable": "",
-            "hasListing": false
+            "iterable": ""
           }
         }
       },
