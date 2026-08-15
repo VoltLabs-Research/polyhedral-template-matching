@@ -360,7 +360,7 @@ const PtmCrystalData& emptyCrystalData(){
     return empty;
 }
 
-} // namespace
+}
 
 PtmCrystalInfoProvider::PtmCrystalInfoProvider(){
     initialize(static_cast<int>(StructureType::ICO));

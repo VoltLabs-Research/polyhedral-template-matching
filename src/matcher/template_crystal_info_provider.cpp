@@ -16,7 +16,7 @@ const Matrix3& identityMatrix(){
     return matrix;
 }
 
-} // namespace
+}
 
 TemplateCrystalInfoProvider::TemplateCrystalInfoProvider(
     std::shared_ptr<const StructureAnalysisCrystalInfo> builtin,

@@ -20,8 +20,6 @@ namespace Volt{
 
 class PTM : public NearestNeighborFinder{
 public:
-    // This enumeration classifies the possible chemical 
-    // arrangement schemes that a region or cluster can have in the crystal lattice.
     enum class OrderingType{
         ORDERING_NONE = 0,
         ORDERING_PURE = 1,
@@ -51,38 +49,7 @@ public:
         _inputCrystalStructure = structureType;
     }
 
-    // Which structure families ptm_index() should actually search for.
-    //
-    // ptm_index() is not a single search with cheap per-structure predicates: it
-    // runs up to *three independent pipelines*, each with its own neighbour-shell
-    // ordering, convex hull and canonical graph labelling —
-    //   * one shell        -> SC, FCC, HCP, ICO, BCC
-    //   * 4 inner/3 outer  -> DCUB, DHEX
-    //   * 3 inner/2 outer  -> GRAPHENE
-    // Their costs are additive. Measured on 256k-atom FCC Al (16 threads):
-    // PTM_CHECK_ALL 1074 ms vs 483 ms for the one-shell family alone (2.2x), and
-    // 483 + 403 (diamond) + 241 (graphene) = 1127 ms confirms the three passes.
-    //
-    // Verified against the unpruned search on 256k-atom FCC Al: at thermal
-    // displacements of sigma = 0.08 and 0.15 A the classification is *bit-identical*
-    // (same per-atom type, RMSD, scale, orientation and template index). Only at an
-    // extreme sigma = 0.25 A do the two disagree, on 1227 atoms out of 256000
-    // (0.5%) — and there the unpruned search is the one that is wrong: it labels
-    // 1213 atoms GRAPHENE and 14 diamond, neither of which can occur in a
-    // monatomic FCC metal. match_graphene() applies no topological test at all, it
-    // just tries eight permutations and competes on RMSD, so in heavily disordered
-    // environments it wins spuriously.
-    //
-    // So the default set is derived from the declared input crystal structure, and
-    // callers that genuinely need a wider search (mixed samples, graphene, or an
-    // exploratory pass) can widen it explicitly via setStructureCheckFlags().
-    // Note PTM's own PTM_CHECK_DEFAULT (FCC|HCP|ICO|BCC) reflects the same idea.
     static int defaultCheckFlagsForLattice(LatticeStructureType inputStructure){
-        // All five share a single neighbour-ordering pass, so once we are paying
-        // for that pass, keeping the whole family costs comparatively little and
-        // preserves the partner phases that matter physically: HCP for stacking
-        // faults and twins in FCC, ICO for disordered/liquid-like regions, BCC for
-        // transformation products.
         constexpr int oneShellFamily =
             PTM_CHECK_SC | PTM_CHECK_FCC | PTM_CHECK_HCP | PTM_CHECK_ICO | PTM_CHECK_BCC;
         constexpr int diamondFamily = PTM_CHECK_DCUB | PTM_CHECK_DHEX;
@@ -95,18 +62,13 @@ public:
                 return oneShellFamily;
             case LATTICE_CUBIC_DIAMOND:
             case LATTICE_HEX_DIAMOND:
-                // Defects and surfaces in a diamond lattice routinely present with
-                // non-diamond coordination, so keep the one-shell family too.
                 return oneShellFamily | diamondFamily;
             default:
                 break;
         }
-        // LATTICE_OTHER and anything unrecognised: no basis to narrow, so search
-        // everything and keep the previous behaviour.
         return PTM_CHECK_ALL;
     }
 
-    // Explicitly override the derived set. 0 restores "derive from input structure".
     void setStructureCheckFlags(int flags){
         _structureCheckFlags = flags;
     }
@@ -257,16 +219,6 @@ public:
         return _particleCount;
     }
 
-    // Per-thread PTM working state. Construction is not cheap: it calls
-    // ptm_initialize_local(), which allocates a voro++ voronoicell_neighbor and
-    // with it about a dozen new[] blocks. It must therefore be created once per
-    // *thread*, never once per parallel_for range — see
-    // determineLocalStructuresWithPTM(), which holds these in an
-    // enumerable_thread_specific.
-    //
-    // Owns a raw handle, so copying it would double-free. The implicit copy
-    // constructor used to exist and was a latent bug; moves are allowed because
-    // enumerable_thread_specific may need one.
     class Kernel{
     public:
         Kernel(const PTM& algorithm);
@@ -335,7 +287,6 @@ private:
     const int* _particleTypes = nullptr;
     const Point3* _sourcePositions = nullptr;
     LatticeStructureType _inputCrystalStructure = LATTICE_OTHER;
-    // 0 == derive from _inputCrystalStructure; see ptmCheckFlags().
     int _structureCheckFlags = 0;
     std::vector<std::uint8_t> _cachedNeighborCounts;
     std::vector<int> _cachedNeighborIndices;

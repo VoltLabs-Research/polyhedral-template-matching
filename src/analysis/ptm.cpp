@@ -49,14 +49,10 @@ int PTM::supportedPtmCheckFlags(){
     return PTM_CHECK_ALL;
 }
 
-// Initialize the PTM algorithm, including global one-time setup and neighbor-search capacity.
-// By deriving from NearestNeighborFinder, we reserve space for the maximum neighbor PTM needs
 PTM::PTM() : NearestNeighborFinder(MAX_INPUT_NEIGHBORS){
     ptm_initialize_global();
 }
 
-// Collects and encodes the local neighbor shell around a particle into a bitmask.
-// This lets the PTM algorithm quickly refer back to which neighbor belong where.
 int PTM::Kernel::cacheNeighbors(size_t particleIndex, uint64_t* res){
     const int numNeighbors = _algorithm.cachedNeighborCount(particleIndex);
 
@@ -71,8 +67,6 @@ int PTM::Kernel::cacheNeighbors(size_t particleIndex, uint64_t* res){
     return ptm_preorder_neighbours(_handle, numNeighbors, points, res);
 }
 
-// Initializes all spatial indexing, periodic-image offsets, and builds
-// a shallow k-d tree for fast neighbor searches in the current simulation frame.
 bool PTM::prepare(
     const Point3* positions,
     size_t particleCount,
@@ -190,7 +184,6 @@ bool PTM::prepare(
     return true;
 }
 
-// Allocates and initializes the per-thread PTM state needed by the C library
 PTM::Kernel::Kernel(const PTM& algorithm) 
     : _algorithm(algorithm)
     , _structureType(StructureType::OTHER){
@@ -198,9 +191,6 @@ PTM::Kernel::Kernel(const PTM& algorithm)
     _F.setZero();
 }
 
-// Takes over the handle and leaves the source with none, so the moved-from
-// destructor is a no-op instead of a second ptm_uninitialize_local() on the same
-// pointer.
 PTM::Kernel::Kernel(Kernel&& other) noexcept
     : _algorithm(other._algorithm)
     , _handle(other._handle)
@@ -219,14 +209,12 @@ PTM::Kernel::Kernel(Kernel&& other) noexcept
     other._handle = nullptr;
 }
 
-// Cleans up the per-thread PTM state on destruction.
 PTM::Kernel::~Kernel(){
     if(_handle){
         ptm_uninitialize_local(_handle);
     }
 }
 
-// Convert the raw quaternion array returned by PTM into our Quaternion class
 Quaternion PTM::Kernel::orientation() const{
     return Quaternion(
         _quaternion[1],
@@ -252,19 +240,16 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
     int dummy = 0;
     ptm_decode_correspondences(
         finder->correspondenceSeedPtmType(),
-        // Mask generated in cacheNeighbors
         cachedNeighbors[atomIndex],
         env->correspondences,
         &dummy
     );
 
-    // Central
     env->atom_indices[0] = static_cast<int>(atomIndex);
     env->points[0][0] = 0.0;
     env->points[0][1] = 0.0;
     env->points[0][2] = 0.0;
 
-    // Neighbors by correpondences
     for(int i = 0; i < numNeighbors; ++i){
         int p = env->correspondences[i + 1] - 1;
         const int neighborAtomIndex = finder->cachedNeighborIndex(atomIndex, p);
@@ -276,7 +261,6 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
         env->points[i + 1][2] = delta.z();
     }
 
-    // Types
     if(particleTypes){
         env->numbers[0] = particleTypes[atomIndex];
         for(int i = 0; i < numNeighbors; ++i){
@@ -300,8 +284,6 @@ StructureType PTM::Kernel::identifyStructure(size_t particleIndex, const std::ve
     nbrdata.particleTypes = _algorithm._identifyOrdering ? _algorithm._particleTypes : nullptr;
     nbrdata.cachedNeighbors = &cachedNeighbors;
 
-    // Only the structure families this run can plausibly contain; searching for
-    // diamond and graphene in a metal costs ~2.2x for no information gained.
     const int32_t flags = _algorithm.ptmCheckFlags();
 
     ptm_result_t result;
@@ -327,7 +309,6 @@ StructureType PTM::Kernel::identifyStructure(size_t particleIndex, const std::ve
         memcpy(_F.elements(), result.F, 9 * sizeof(double));
     }
 
-    // Apply cutoff with more lenient thresholds for diamond structures
     if(result.structure_type == PTM_MATCH_NONE || 
        (_algorithm._rmsdCutoff != 0 && _rmsd > _algorithm._rmsdCutoff)) {
         _structureType = StructureType::OTHER;
@@ -354,7 +335,6 @@ StructureType PTM::Kernel::identifyStructure(size_t particleIndex, const std::ve
     return _structureType;
 }
 
-// Returns how many "template" neighbors (ideal lattice points) PTM will give us
 int PTM::Kernel::numTemplateNeighbors() const{
     int ptmType = toPtmStructureType(_structureType);
     if(ptmType == PTM_MATCH_NONE) return 0;

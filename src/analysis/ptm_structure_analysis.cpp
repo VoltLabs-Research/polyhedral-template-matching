@@ -22,21 +22,14 @@ namespace{
 
 bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient,
               int structureCheckFlags){
-    // Why: the deformation gradient is the atom-level analogue of OVITO's
-    // `Particles::ElasticDeformationGradientProperty`. We ask PTM for it
-    // whenever a PtmLocalAtomState container is supplied so downstream
-    // code (atoms.parquet exporter) can surface it. When no state
-    // container is requested (e.g. cluster-only passes from internal
-    // helpers) we keep the cheaper path that skips the 3x3 matrix.
     ptm.setCalculateDefGradient(collectDefGradient);
     ptm.setRmsdCutoff(std::numeric_limits<double>::infinity());
     ptm.setInputCrystalStructure(context.inputCrystalType);
-    // 0 leaves PTM deriving the search set from the input crystal structure.
     ptm.setStructureCheckFlags(structureCheckFlags);
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
 }
 
-} // namespace
+}
 
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis){
     StructureContext& context = analysis.context();
@@ -150,17 +143,6 @@ void determineLocalStructuresWithPTM(
     const bool buildCationNetwork = (templates != nullptr && !templates->empty() && cationNeighborRadius > 0.0);
     std::vector<std::array<int, MAX_NEIGHBORS>> cationNeighbors;
 
-    // One kernel per worker thread, not per parallel_for range.
-    //
-    // This used to be `PTM::Kernel kernel(ptm);` inside the body. Each construction
-    // runs ptm_initialize_local(), which builds a voro++ voronoicell_neighbor and
-    // roughly a dozen new[] blocks with it; auto_partitioner splits a large frame
-    // into far more ranges than there are threads, so an 864k-atom frame paid that
-    // cost hundreds of times, concurrently, in the allocator. That is where the
-    // nondeterministic multi-minute straggler was stalling: a captured stack showed
-    // one worker inside scalable_malloc under voronoicell_base's constructor while
-    // every other worker sat idle and the main thread waited in execute_and_wait.
-    // Reproduced 3 runs in 12 on byte-identical input before this change.
     tbb::enumerable_thread_specific<PTM::Kernel> kernels([&ptm]{ return PTM::Kernel(ptm); });
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
@@ -196,14 +178,11 @@ void determineLocalStructuresWithPTM(
             }
 
             if(definedType > 0){
-                // A defined template is the best fit for this atom
                 structureTypesData[i] = definedType;
                 allowedSymmetryMasksData[i] = buildCationNetwork
                     ? static_cast<std::int64_t>(AnalysisSymmetryUtils::fullSymmetryMask(1))
                     : 0;
                 
-                // Cation-cation neighbours are resolved later;
-                // the built-in correspondence machinery does not apply.
                 localCounts[i] = 0;
                 neighborCountsData[i] = 0;
                 correspondenceCodes[i] = 0;
@@ -358,7 +337,6 @@ void determineLocalStructuresWithPTM(
 
                     if(j == i) continue;    
 
-                    // Only same template type forms the subnetwork
                     if(structureTypesData[j] != type) continue;
 
                     cationNeighbors[i][static_cast<std::size_t>(count)] = static_cast<int>(j);

@@ -30,7 +30,7 @@ double misorientationAngle(const Matrix3& a, const Matrix3& b){
     return std::acos(cosine);
 }
 
-} // namespace
+}
 
 OrientationBasedClusterRule::OrientationBasedClusterRule(
     std::shared_ptr<const std::vector<OrientationBasedAtomState>> atomStates,

@@ -83,7 +83,7 @@ PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
 void PolyhedralTemplateMatchingService::setStructureCheckFlags(std::string families){
     _structureCheckFlags = 0;
     if(families.empty()){
-        return;    // derive from --crystal_structure
+        return;
     }
 
     static const std::pair<std::string_view, int> table[] = {
@@ -102,7 +102,6 @@ void PolyhedralTemplateMatchingService::setStructureCheckFlags(std::string famil
             comma = families.size();
         }
         std::string token = families.substr(start, comma - start);
-        // trim and upcase
         token.erase(0, token.find_first_not_of(" \t"));
         const auto lastChar = token.find_last_not_of(" \t");
         token.erase(lastChar == std::string::npos ? 0 : lastChar + 1);
@@ -305,11 +304,6 @@ json PolyhedralTemplateMatchingService::compute(
                 if(!state.valid){
                     return;
                 }
-                // atoms.parquet carries only display-relevant per-atom data: structure
-                // (via structure_id/name), rmsd, orientation, interatomic distance,
-                // correspondences. scaling/deformation_gradient/ordering_type/
-                // template_index are dropped; neighbor topology lives in the
-                // _neighbor_lattice.parquet sidecar.
                 const Quaternion orientation = state.orientation.normalized();
                 writer.field("rmsd", state.rmsd);
                 writer.field("orientation", std::vector<double>{orientation.x(), orientation.y(), orientation.z(), orientation.w()});

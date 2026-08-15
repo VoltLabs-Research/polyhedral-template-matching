@@ -195,7 +195,7 @@ bool hullCanonical(int numPoints, const double (*points)[3], int wantFacets,
     return true;
 }
 
-} // namespace
+}
 
 bool TemplateMatcher::compile(const TemplateDefinition& definition,
                               LoadedTemplate& out, std::string* error) const
@@ -443,7 +443,7 @@ bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition&
     return true;
 }
 
-} // namespace
+}
 
 int TemplateMatcher::loadDirectory(const std::filesystem::path& directory){
     std::error_code errorCode;
