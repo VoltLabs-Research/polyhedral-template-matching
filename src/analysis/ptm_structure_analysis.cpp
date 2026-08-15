@@ -10,6 +10,7 @@
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_reduce.h>
+#include <tbb/enumerable_thread_specific.h>
 
 #include <array>
 #include <limits>
@@ -149,8 +150,21 @@ void determineLocalStructuresWithPTM(
     const bool buildCationNetwork = (templates != nullptr && !templates->empty() && cationNeighborRadius > 0.0);
     std::vector<std::array<int, MAX_NEIGHBORS>> cationNeighbors;
 
+    // One kernel per worker thread, not per parallel_for range.
+    //
+    // This used to be `PTM::Kernel kernel(ptm);` inside the body. Each construction
+    // runs ptm_initialize_local(), which builds a voro++ voronoicell_neighbor and
+    // roughly a dozen new[] blocks with it; auto_partitioner splits a large frame
+    // into far more ranges than there are threads, so an 864k-atom frame paid that
+    // cost hundreds of times, concurrently, in the allocator. That is where the
+    // nondeterministic multi-minute straggler was stalling: a captured stack showed
+    // one worker inside scalable_malloc under voronoicell_base's constructor while
+    // every other worker sat idle and the main thread waited in execute_and_wait.
+    // Reproduced 3 runs in 12 on byte-identical input before this change.
+    tbb::enumerable_thread_specific<PTM::Kernel> kernels([&ptm]{ return PTM::Kernel(ptm); });
+
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
-        PTM::Kernel kernel(ptm);
+        PTM::Kernel& kernel = kernels.local();
         double env[PTM_MAX_INPUT_POINTS][3];
 
         for(size_t i = range.begin(); i < range.end(); ++i){

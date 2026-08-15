@@ -198,9 +198,32 @@ PTM::Kernel::Kernel(const PTM& algorithm)
     _F.setZero();
 }
 
+// Takes over the handle and leaves the source with none, so the moved-from
+// destructor is a no-op instead of a second ptm_uninitialize_local() on the same
+// pointer.
+PTM::Kernel::Kernel(Kernel&& other) noexcept
+    : _algorithm(other._algorithm)
+    , _handle(other._handle)
+    , _particleIndex(other._particleIndex)
+    , _rmsd(other._rmsd)
+    , _corrCode(other._corrCode)
+    , _scale(other._scale)
+    , _interatomicDistance(other._interatomicDistance)
+    , _F(other._F)
+    , _structureType(other._structureType)
+    , _orderingType(other._orderingType)
+    , _bestTemplateIndex(other._bestTemplateIndex)
+    , _bestTemplate(other._bestTemplate)
+    , _env(other._env){
+    std::memcpy(_quaternion, other._quaternion, 4 * sizeof(double));
+    other._handle = nullptr;
+}
+
 // Cleans up the per-thread PTM state on destruction.
 PTM::Kernel::~Kernel(){
-    ptm_uninitialize_local(_handle);
+    if(_handle){
+        ptm_uninitialize_local(_handle);
+    }
 }
 
 // Convert the raw quaternion array returned by PTM into our Quaternion class

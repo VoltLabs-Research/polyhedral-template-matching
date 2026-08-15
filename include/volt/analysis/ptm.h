@@ -257,10 +257,26 @@ public:
         return _particleCount;
     }
 
+    // Per-thread PTM working state. Construction is not cheap: it calls
+    // ptm_initialize_local(), which allocates a voro++ voronoicell_neighbor and
+    // with it about a dozen new[] blocks. It must therefore be created once per
+    // *thread*, never once per parallel_for range — see
+    // determineLocalStructuresWithPTM(), which holds these in an
+    // enumerable_thread_specific.
+    //
+    // Owns a raw handle, so copying it would double-free. The implicit copy
+    // constructor used to exist and was a latent bug; moves are allowed because
+    // enumerable_thread_specific may need one.
     class Kernel{
     public:
         Kernel(const PTM& algorithm);
         ~Kernel();
+
+        Kernel(const Kernel&) = delete;
+        Kernel& operator=(const Kernel&) = delete;
+
+        Kernel(Kernel&& other) noexcept;
+        Kernel& operator=(Kernel&&) = delete;
 
         StructureType identifyStructure(size_t particleIndex, const std::vector<uint64_t>& cachedNeighbors, Quaternion* qtarget = nullptr);
         int cacheNeighbors(size_t particleIndex, uint64_t* res);
