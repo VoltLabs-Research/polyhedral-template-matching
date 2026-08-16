@@ -20,11 +20,15 @@
 namespace Volt{
 
 bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient,
-              int structureCheckFlags){
+              int structureCheckFlags, const int* particleTypes){
     ptm.setCalculateDefGradient(collectDefGradient);
     ptm.setRmsdCutoff(std::numeric_limits<double>::infinity());
     ptm.setInputCrystalStructure(context.inputCrystalType);
     ptm.setStructureCheckFlags(structureCheckFlags);
+    if(particleTypes){
+        ptm.setParticleTypes(particleTypes);
+        ptm.setIdentifyOrdering(true);
+    }
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
 }
 
@@ -96,7 +100,8 @@ void determineLocalStructuresWithPTM(
     std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates,
     const TemplateMatcher* templates,
     double cationNeighborRadius,
-    int structureCheckFlags
+    int structureCheckFlags,
+    const int* particleTypes
 ) {
     StructureContext& context = analysis.context();
     const size_t N = context.atomCount();
@@ -107,7 +112,7 @@ void determineLocalStructuresWithPTM(
 
     PTM ptm;
     const bool collectPerAtomState = static_cast<bool>(atomStates);
-    if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags)){
+    if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags, particleTypes)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
     spdlog::debug("PTM: searching structure families 0x{:x} (input lattice {})",

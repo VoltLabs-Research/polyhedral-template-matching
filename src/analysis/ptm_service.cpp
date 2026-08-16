@@ -74,7 +74,8 @@ PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
     , _latticeDirectory()
     , _cationNeighborRadius(0.0)
     , _cationMisorientation(12.0)
-    , _structureCheckFlags(0){}
+    , _structureCheckFlags(0)
+    , _identifyOrdering(false){}
 
 void PolyhedralTemplateMatchingService::setStructureCheckFlags(std::string families){
     _structureCheckFlags = 0;
@@ -148,6 +149,10 @@ void PolyhedralTemplateMatchingService::setCationMisorientation(double degrees){
     _cationMisorientation = degrees;
 }
 
+void PolyhedralTemplateMatchingService::setIdentifyOrdering(bool identifyOrdering){
+    _identifyOrdering = identifyOrdering;
+}
+
 json PolyhedralTemplateMatchingService::compute(
     const LammpsParser::Frame& frame,
     const std::string& outputBase,
@@ -184,8 +189,15 @@ json PolyhedralTemplateMatchingService::compute(
         const bool clusterTemplates = (templatesPtr != nullptr && _cationNeighborRadius > 0.0);
         const double cationRadius = clusterTemplates ? _cationNeighborRadius : 0.0;
 
+        const bool identifyOrdering = _identifyOrdering
+            && frame.types.size() >= context.atomCount();
+        if(_identifyOrdering && !identifyOrdering){
+            spdlog::warn("PTM: ordering identification requires per-atom types; the input dump has none");
+        }
+
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
-                                        _structureCheckFlags);
+                                        _structureCheckFlags,
+                                        identifyOrdering ? frame.types.data() : nullptr);
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),
@@ -272,6 +284,27 @@ json PolyhedralTemplateMatchingService::compute(
 
         result["sub_listings"] = json::object();
         result["sub_listings"]["structure_counts"] = std::move(structureCountRows);
+
+        if(identifyOrdering){
+            std::map<int, std::int64_t> orderingCounts;
+            for(std::size_t atomIndex = 0; atomIndex < context.atomCount(); ++atomIndex){
+                orderingCounts[atomIndex < ptmAtomStates->size()
+                    ? (*ptmAtomStates)[atomIndex].orderingType
+                    : static_cast<int>(PTM::OrderingType::ORDERING_NONE)]++;
+            }
+
+            json orderingCountRows = json::array();
+            for(const auto& [orderingType, count] : orderingCounts){
+                orderingCountRows.push_back({
+                    {"ordering_id", orderingType},
+                    {"ordering_name", PTM::orderingTypeName(orderingType)},
+                    {"count", count},
+                    {"fraction", static_cast<double>(count) / totalAtomsForFraction}
+                });
+            }
+            result["sub_listings"]["ordering_counts"] = std::move(orderingCountRows);
+        }
+
         result["per-atom-properties"] = json::array();
 
         std::vector<AnalysisContext::ExtraScalarColumn> extraDumpColumns;
@@ -292,7 +325,7 @@ json PolyhedralTemplateMatchingService::compute(
             const std::string analysisPath = outputBase + "_ptm_analysis.parquet";
             const std::string atomsPath = outputBase + "_atoms.parquet";
 
-            auto ptmColumnWriter = [&ptmAtomStates](ColumnarAtomWriter& writer, std::size_t atomIndex, int){
+            auto ptmColumnWriter = [&ptmAtomStates, identifyOrdering](ColumnarAtomWriter& writer, std::size_t atomIndex, int){
                 if(atomIndex >= ptmAtomStates->size()){
                     return;
                 }
@@ -305,6 +338,9 @@ json PolyhedralTemplateMatchingService::compute(
                 writer.field("orientation", std::vector<double>{orientation.x(), orientation.y(), orientation.z(), orientation.w()});
                 writer.field("interatomic_distance", state.interatomicDistance);
                 writer.field("correspondences", static_cast<std::int64_t>(state.correspondencesCode));
+                if(identifyOrdering){
+                    writer.field("ordering_type", static_cast<std::int64_t>(state.orderingType));
+                }
             };
 
             StructureIdentificationExport::StructureNameResolver nameResolver =

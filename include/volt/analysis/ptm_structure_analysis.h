@@ -34,7 +34,8 @@ void determineLocalStructuresWithPTM(
     std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates = nullptr,
     const TemplateMatcher* templates = nullptr,
     double cationNeighborRadius = 0.0,
-    int structureCheckFlags = 0
+    int structureCheckFlags = 0,
+    const int* particleTypes = nullptr
 );
 
 }

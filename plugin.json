@@ -15,7 +15,7 @@
             "icon": "HiCubeTransparent",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "2.1.2",
+            "version": "2.2.0",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Ejecuta PTM, exporta structure_type por atomo y genera los artefactos de cluster graph consumibles por OpenDXA."
           }
@@ -75,6 +75,12 @@
                 "argument": "dissolve_small_clusters",
                 "type": "boolean",
                 "label": "Dissolve Small Clusters",
+                "default": false
+              },
+              {
+                "argument": "identify_ordering",
+                "type": "boolean",
+                "label": "Identify Ordering Types",
                 "default": false
               }
             ]
@@ -289,6 +295,23 @@
                       1
                     ]
                   },
+                  "columns": [
+                    {
+                      "column": "count",
+                      "label": "Count",
+                      "format": "integer"
+                    },
+                    {
+                      "column": "fraction",
+                      "label": "Fraction",
+                      "format": "percent"
+                    }
+                  ]
+                },
+                {
+                  "source": "ordering_counts",
+                  "title": "Chemical ordering results",
+                  "label": "ordering_name",
                   "columns": [
                     {
                       "column": "count",

@@ -29,8 +29,38 @@ public:
         ORDERING_B2 = 5,
         ORDERING_ZINCBLENDE_WURTZITE = 6,
         ORDERING_BORON_NITRIDE = 7,
-        NUM_ORDERING_TYPES 
+        NUM_ORDERING_TYPES
     };
+
+    static const char* orderingTypeName(OrderingType ordering){
+        switch(ordering){
+            case OrderingType::ORDERING_NONE:
+                return "NONE";
+            case OrderingType::ORDERING_PURE:
+                return "PURE";
+            case OrderingType::ORDERING_L10:
+                return "L10";
+            case OrderingType::ORDERING_L12_A:
+                return "L12_A";
+            case OrderingType::ORDERING_L12_B:
+                return "L12_B";
+            case OrderingType::ORDERING_B2:
+                return "B2";
+            case OrderingType::ORDERING_ZINCBLENDE_WURTZITE:
+                return "ZINCBLENDE_WURTZITE";
+            case OrderingType::ORDERING_BORON_NITRIDE:
+                return "BORON_NITRIDE";
+            case OrderingType::NUM_ORDERING_TYPES:
+                break;
+        }
+        return "UNKNOWN";
+    }
+
+    static const char* orderingTypeName(int ordering){
+        return (0 <= ordering && ordering < static_cast<int>(OrderingType::NUM_ORDERING_TYPES))
+            ? orderingTypeName(static_cast<OrderingType>(ordering))
+            : "UNKNOWN";
+    }
 
     static constexpr int MAX_INPUT_NEIGHBORS = 18;
     static constexpr int MAX_OUTPUT_NEIGHBORS = 18;
@@ -182,6 +212,14 @@ public:
 
     bool calculateDefGradient() const{
         return _calculateDefGradient;
+    }
+
+    void setIdentifyOrdering(bool identifyOrdering){
+        _identifyOrdering = identifyOrdering;
+    }
+
+    void setParticleTypes(const int* particleTypes){
+        _particleTypes = particleTypes;
     }
 
     bool prepare(const Point3* positions, size_t particle_count, const SimulationCell& cell);

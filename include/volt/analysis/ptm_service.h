@@ -24,7 +24,9 @@ public:
     void setCationMisorientation(double degrees);
 
     void setStructureCheckFlags(std::string families);
-    
+
+    void setIdentifyOrdering(bool identifyOrdering);
+
     json compute(
         const LammpsParser::Frame& frame,
         const std::string& outputBase,
@@ -39,6 +41,7 @@ private:
     double _cationNeighborRadius;
     double _cationMisorientation;
     int _structureCheckFlags;
+    bool _identifyOrdering;
 };
     
 }
