@@ -39,8 +39,6 @@
 
 namespace Volt{
 
-namespace{
-
 Matrix3 quaternionToMatrix(const Quaternion& orientation){
     const Quaternion normalized = orientation.normalized();
     return Matrix3(
@@ -67,8 +65,6 @@ std::shared_ptr<std::vector<OrientationClusterAtomState>> buildOrientationCluste
         }
     }
     return states;
-}
-
 }
 
 PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()

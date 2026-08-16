@@ -18,7 +18,6 @@
 #include <vector>
 
 namespace Volt{
-namespace{
 
 bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient,
               int structureCheckFlags){
@@ -27,8 +26,6 @@ bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool co
     ptm.setInputCrystalStructure(context.inputCrystalType);
     ptm.setStructureCheckFlags(structureCheckFlags);
     return ptm.prepare(context.positions->constDataPoint3(), particleCount, context.simCell);
-}
-
 }
 
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis){

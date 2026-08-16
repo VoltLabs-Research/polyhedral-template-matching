@@ -12,8 +12,6 @@
 
 namespace Volt{
 
-namespace{
-
 double traceOf(const Matrix3& matrix){
     return matrix(0, 0) + matrix(1, 1) + matrix(2, 2);
 }
@@ -28,8 +26,6 @@ double misorientationAngle(const Matrix3& a, const Matrix3& b){
         cosine = -1.0;
     }
     return std::acos(cosine);
-}
-
 }
 
 OrientationBasedClusterRule::OrientationBasedClusterRule(

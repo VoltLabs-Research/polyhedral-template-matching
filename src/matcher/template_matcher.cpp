@@ -20,8 +20,6 @@
 
 namespace Volt{
 
-namespace{
-
 using Vec3 = std::array<double, 3>;
 
 double calcRmsd(int numPoints, const double (*idealPoints)[3],
@@ -195,8 +193,6 @@ bool hullCanonical(int numPoints, const double (*points)[3], int wantFacets,
     return true;
 }
 
-}
-
 bool TemplateMatcher::compile(const TemplateDefinition& definition,
                               LoadedTemplate& out, std::string* error) const
 {
@@ -363,8 +359,6 @@ bool TemplateMatcher::addTemplate(const TemplateDefinition& definition, std::str
     return true;
 }
 
-namespace{
-
 bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition& out, std::string* error){
     const auto fail = [&](const std::string& message){
         if(error){
@@ -441,8 +435,6 @@ bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition&
         return fail(std::string("invalid template: ") + e.what());
     }
     return true;
-}
-
 }
 
 int TemplateMatcher::loadDirectory(const std::filesystem::path& directory){

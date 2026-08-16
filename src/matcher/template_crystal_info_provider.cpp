@@ -4,8 +4,6 @@
 
 namespace Volt{
 
-namespace{
-
 const Vector3& zeroVector(){
     static const Vector3 vector = Vector3::Zero();
     return vector;
@@ -14,8 +12,6 @@ const Vector3& zeroVector(){
 const Matrix3& identityMatrix(){
     static const Matrix3 matrix = Matrix3::Identity();
     return matrix;
-}
-
 }
 
 TemplateCrystalInfoProvider::TemplateCrystalInfoProvider(

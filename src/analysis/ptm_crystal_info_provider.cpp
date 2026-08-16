@@ -16,7 +16,6 @@
 #include <utility>
 
 namespace Volt::PtmStructureAnalysisDetail{
-namespace{
 
 inline constexpr std::array<int, 6> kSimpleCubicCanonicalToTemplateSlot = {5, 4, 3, 2, 1, 0};
 inline constexpr std::array<int, 6> kSimpleCubicTemplateToCanonicalNeighborSlot = {5, 4, 3, 2, 1, 0};
@@ -358,8 +357,6 @@ PtmCrystalData buildCrystalData(int structureType){
 const PtmCrystalData& emptyCrystalData(){
     static const PtmCrystalData empty;
     return empty;
-}
-
 }
 
 PtmCrystalInfoProvider::PtmCrystalInfoProvider(){
