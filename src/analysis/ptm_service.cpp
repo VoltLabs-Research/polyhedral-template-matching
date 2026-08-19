@@ -195,9 +195,11 @@ json PolyhedralTemplateMatchingService::compute(
             spdlog::warn("PTM: ordering identification requires per-atom types; the input dump has none");
         }
 
+        PtmRmsdCutoffReport rmsdCutoffReport;
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
                                         _structureCheckFlags,
-                                        identifyOrdering ? frame.types.data() : nullptr);
+                                        identifyOrdering ? frame.types.data() : nullptr,
+                                        &rmsdCutoffReport);
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),
@@ -267,7 +269,10 @@ json PolyhedralTemplateMatchingService::compute(
         result["main_listing"] = {
             {"total_atoms", frame.natoms},
             {"structure_count", static_cast<int>(structureCounts.size())},
-            {"rmsd", _rmsd}
+            {"rmsd", _rmsd},
+            {"atoms_discarded_by_rmsd", static_cast<std::int64_t>(rmsdCutoffReport.rejectedAtoms)},
+            {"smallest_discarded_rmsd", rmsdCutoffReport.smallestRejectedRmsd},
+            {"median_discarded_rmsd", rmsdCutoffReport.medianRejectedRmsd}
         };
 
         json structureCountRows = json::array();

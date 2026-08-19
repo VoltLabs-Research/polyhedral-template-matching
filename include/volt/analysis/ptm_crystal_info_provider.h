@@ -39,10 +39,10 @@ public:
     int templateToCanonicalNeighborSlot(int structureType, int templateSlot) const;
 
 private:
-    void initialize(int structureType) const;
+    void initialize(int structureType);
     const PtmCrystalData& dataFor(int structureType) const;
 
-    mutable std::unordered_map<int, PtmCrystalData> _data;
+    std::unordered_map<int, PtmCrystalData> _data;
 };
 
 std::shared_ptr<const StructureAnalysisCrystalInfo> ptmCrystalInfoProvider();

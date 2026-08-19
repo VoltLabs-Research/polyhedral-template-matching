@@ -27,6 +27,12 @@ struct PtmLocalAtomState{
         , deformationGradient(Matrix3::Identity()){}
 };
 
+struct PtmRmsdCutoffReport{
+    std::size_t rejectedAtoms = 0;
+    double medianRejectedRmsd = 0.0;
+    double smallestRejectedRmsd = 0.0;
+};
+
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis);
 void determineLocalStructuresWithPTM(
     StructureAnalysis& analysis,
@@ -35,7 +41,8 @@ void determineLocalStructuresWithPTM(
     const TemplateMatcher* templates = nullptr,
     double cationNeighborRadius = 0.0,
     int structureCheckFlags = 0,
-    const int* particleTypes = nullptr
+    const int* particleTypes = nullptr,
+    PtmRmsdCutoffReport* rmsdCutoffReport = nullptr
 );
 
 }

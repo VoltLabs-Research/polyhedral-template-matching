@@ -239,41 +239,35 @@ static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested,
 
     int dummy = 0;
     ptm_decode_correspondences(
-        finder->correspondenceSeedPtmType(),
+        PTM_MATCH_NONE,
         cachedNeighbors[atomIndex],
         env->correspondences,
         &dummy
     );
 
-    env->atom_indices[0] = static_cast<int>(atomIndex);
+    env->atom_indices[0] = atomIndex;
     env->points[0][0] = 0.0;
     env->points[0][1] = 0.0;
     env->points[0][2] = 0.0;
+    env->numbers[0] = particleTypes ? particleTypes[atomIndex] : 0;
 
-    for(int i = 0; i < numNeighbors; ++i){
-        int p = env->correspondences[i + 1] - 1;
+    int resolved = 0;
+    while(resolved < numNeighbors){
+        const int p = env->correspondences[resolved + 1] - 1;
         const int neighborAtomIndex = finder->cachedNeighborIndex(atomIndex, p);
-        if(neighborAtomIndex < 0) continue;
+        if(neighborAtomIndex < 0){
+            break;
+        }
         const Vector3 delta = finder->cachedNeighborDelta(atomIndex, p);
-        env->atom_indices[i + 1] = static_cast<size_t>(neighborAtomIndex);
-        env->points[i + 1][0] = delta.x();
-        env->points[i + 1][1] = delta.y();
-        env->points[i + 1][2] = delta.z();
+        env->atom_indices[resolved + 1] = static_cast<size_t>(neighborAtomIndex);
+        env->points[resolved + 1][0] = delta.x();
+        env->points[resolved + 1][1] = delta.y();
+        env->points[resolved + 1][2] = delta.z();
+        env->numbers[resolved + 1] = particleTypes ? particleTypes[static_cast<size_t>(neighborAtomIndex)] : 0;
+        ++resolved;
     }
 
-    if(particleTypes){
-        env->numbers[0] = particleTypes[atomIndex];
-        for(int i = 0; i < numNeighbors; ++i){
-            int p = env->correspondences[i + 1] - 1;
-            const int neighborAtomIndex = finder->cachedNeighborIndex(atomIndex, p);
-            if(neighborAtomIndex < 0) continue;
-            env->numbers[i + 1] = particleTypes[static_cast<size_t>(neighborAtomIndex)];
-        }  
-    }else{
-        for(int i = 0; i < numNeighbors + 1; ++i) env->numbers[i] = 0;
-    }
-
-    env->num = numNeighbors + 1;
+    env->num = resolved + 1;
     return env->num;
 }
 

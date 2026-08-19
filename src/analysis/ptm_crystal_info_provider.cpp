@@ -360,8 +360,18 @@ const PtmCrystalData& emptyCrystalData(){
 }
 
 PtmCrystalInfoProvider::PtmCrystalInfoProvider(){
-    initialize(static_cast<int>(StructureType::ICO));
-    initialize(static_cast<int>(StructureType::GRAPHENE));
+    for(const StructureType structureType : {
+        StructureType::SC,
+        StructureType::FCC,
+        StructureType::HCP,
+        StructureType::ICO,
+        StructureType::BCC,
+        StructureType::CUBIC_DIAMOND,
+        StructureType::HEX_DIAMOND,
+        StructureType::GRAPHENE
+    }){
+        initialize(static_cast<int>(structureType));
+    }
 }
 
 std::string_view PtmCrystalInfoProvider::topologyName(int structureType) const{
@@ -453,7 +463,7 @@ int PtmCrystalInfoProvider::templateToCanonicalNeighborSlot(int structureType, i
     return mapping[static_cast<std::size_t>(templateSlot)];
 }
 
-void PtmCrystalInfoProvider::initialize(int structureType) const{
+void PtmCrystalInfoProvider::initialize(int structureType){
     const int normalizedType = normalizedStructureType(structureType);
     if(_data.find(normalizedType) != _data.end()){
         return;
@@ -473,11 +483,7 @@ void PtmCrystalInfoProvider::initialize(int structureType) const{
 }
 
 const PtmCrystalData& PtmCrystalInfoProvider::dataFor(int structureType) const{
-    const int normalizedType = normalizedStructureType(structureType);
-    if(_data.find(normalizedType) == _data.end()){
-        initialize(normalizedType);
-    }
-    const auto it = _data.find(normalizedType);
+    const auto it = _data.find(normalizedStructureType(structureType));
     return it != _data.end() ? it->second : emptyCrystalData();
 }
 

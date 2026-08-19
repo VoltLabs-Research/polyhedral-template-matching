@@ -113,27 +113,6 @@ public:
         return _rmsdCutoff;
     }
 
-    int correspondenceSeedPtmType() const{
-        switch(_inputCrystalStructure){
-            case LATTICE_SC:
-                return PTM_MATCH_SC;
-            case LATTICE_FCC:
-                return PTM_MATCH_FCC;
-            case LATTICE_HCP:
-                return PTM_MATCH_HCP;
-            case LATTICE_BCC:
-                return PTM_MATCH_BCC;
-            case LATTICE_CUBIC_DIAMOND:
-                return PTM_MATCH_DCUB;
-            case LATTICE_HEX_DIAMOND:
-                return PTM_MATCH_DHEX;
-            case LATTICE_OTHER:
-            case NUM_LATTICE_TYPES:
-                break;
-        }
-        return PTM_MATCH_FCC;
-    }
-
     static constexpr bool isCubicLike(StructureType structureType){
         return structureType == StructureType::SC ||
             structureType == StructureType::FCC ||

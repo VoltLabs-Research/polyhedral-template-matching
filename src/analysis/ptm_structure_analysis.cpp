@@ -12,6 +12,7 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/enumerable_thread_specific.h>
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <memory>
@@ -101,7 +102,8 @@ void determineLocalStructuresWithPTM(
     const TemplateMatcher* templates,
     double cationNeighborRadius,
     int structureCheckFlags,
-    const int* particleTypes
+    const int* particleTypes,
+    PtmRmsdCutoffReport* rmsdCutoffReport
 ) {
     StructureContext& context = analysis.context();
     const size_t N = context.atomCount();
@@ -146,16 +148,41 @@ void determineLocalStructuresWithPTM(
     std::vector<std::array<int, MAX_NEIGHBORS>> cationNeighbors;
 
     tbb::enumerable_thread_specific<PTM::Kernel> kernels([&ptm]{ return PTM::Kernel(ptm); });
+    static constexpr int kRmsdHistogramBins = 2000;
+    static constexpr double kRmsdHistogramBinWidth = 0.001;
+    struct RejectedRmsdTally{
+        std::size_t count = 0;
+        double smallest = std::numeric_limits<double>::infinity();
+        std::array<std::size_t, kRmsdHistogramBins + 1> histogram{};
+    };
+    tbb::enumerable_thread_specific<RejectedRmsdTally> rejectedRmsdTallies;
+
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
+        PTM::Kernel& kernel = kernels.local();
+        for(size_t i = range.begin(); i < range.end(); ++i){
+            kernel.cacheNeighbors(i, &cached[i]);
+        }
+    });
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
         PTM::Kernel& kernel = kernels.local();
         double env[PTM_MAX_INPUT_POINTS][3];
 
+        RejectedRmsdTally& rejectedRmsd = rejectedRmsdTallies.local();
+
         for(size_t i = range.begin(); i < range.end(); ++i){
-            kernel.cacheNeighbors(i, &cached[i]);
             StructureType type = kernel.identifyStructure(i, cached);
 
             const bool builtinMatched = (type != StructureType::OTHER && kernel.rmsd() <= rmsdCutoff);
+            if(type != StructureType::OTHER && !builtinMatched){
+                const double rejected = kernel.rmsd();
+                ++rejectedRmsd.count;
+                rejectedRmsd.smallest = std::min(rejectedRmsd.smallest, rejected);
+                const int bin = static_cast<int>(rejected / kRmsdHistogramBinWidth);
+                ++rejectedRmsd.histogram[
+                    static_cast<std::size_t>(std::clamp(bin, 0, kRmsdHistogramBins))
+                ];
+            }
             double bestRmsd = builtinMatched ? kernel.rmsd() : std::numeric_limits<double>::infinity();
             
             int definedType = -1;
@@ -231,6 +258,43 @@ void determineLocalStructuresWithPTM(
             }
         }
     });
+
+    {
+        RejectedRmsdTally rejected;
+        for(const auto& local : rejectedRmsdTallies){
+            rejected.count += local.count;
+            rejected.smallest = std::min(rejected.smallest, local.smallest);
+            for(std::size_t bin = 0; bin < rejected.histogram.size(); ++bin){
+                rejected.histogram[bin] += local.histogram[bin];
+            }
+        }
+
+        if(rejected.count > 0){
+            const std::size_t medianRank = rejected.count / 2;
+            std::size_t seen = 0;
+            std::size_t medianBin = 0;
+            for(std::size_t bin = 0; bin < rejected.histogram.size(); ++bin){
+                seen += rejected.histogram[bin];
+                if(seen > medianRank){
+                    medianBin = bin;
+                    break;
+                }
+            }
+            const double median = (static_cast<double>(medianBin) + 0.5) * kRmsdHistogramBinWidth;
+
+            if(rmsdCutoffReport){
+                rmsdCutoffReport->rejectedAtoms = rejected.count;
+                rmsdCutoffReport->medianRejectedRmsd = median;
+                rmsdCutoffReport->smallestRejectedRmsd = rejected.smallest;
+            }
+            spdlog::info(
+                "PTM: {} of {} atoms ({:.1f}%) matched a lattice template but were discarded by --rmsd {} "
+                "(smallest discarded RMSD {:.4f}, median {:.3f}); raise --rmsd to keep them",
+                rejected.count, N, 100.0 * static_cast<double>(rejected.count) / static_cast<double>(N),
+                rmsdCutoff, rejected.smallest, median
+            );
+        }
+    }
 
     if(
         context.inputCrystalType == LATTICE_CUBIC_DIAMOND ||
