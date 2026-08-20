@@ -112,37 +112,42 @@ int symmetryMappingCount(const ptm::refdata_t& ref){
     return ref.num_mappings;
 }
 
+double shortestVectorLength(const std::vector<Vector3>& vectors){
+    double shortest = std::numeric_limits<double>::max();
+    for(const Vector3& vector : vectors){
+        const double length = vector.length();
+        if(length > EPSILON){
+            shortest = std::min(shortest, length);
+        }
+    }
+    return shortest < std::numeric_limits<double>::max() ? shortest : 0.0;
+}
+
+double canonicalNearestNeighborDistance(int structureType){
+    ensureCoordinationStructuresInitialized();
+    return shortestVectorLength(CoordinationStructures::getCoordStruct(structureType).latticeVectors);
+}
+
 std::vector<Vector3> buildCanonicalLatticeVectors(int structureType, const ptm::refdata_t& ref){
     const int numNeighbors = ref.num_nbrs;
-    std::vector<Vector3> latticeVectors(static_cast<std::size_t>(numNeighbors), Vector3::Zero());
+    const bool simpleCubic = static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::SC;
     const double (*points)[3] = ref.points[canonicalTemplateIndex(ref)];
+    std::vector<Vector3> latticeVectors(static_cast<std::size_t>(numNeighbors), Vector3::Zero());
 
-    if(static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::SC){
-        for(int templateSlot = 0; templateSlot < numNeighbors; ++templateSlot){
-            const int canonicalSlot = kSimpleCubicTemplateToCanonicalNeighborSlot[static_cast<std::size_t>(templateSlot)];
-            const double* point = points[templateSlot + 1];
-            latticeVectors[static_cast<std::size_t>(canonicalSlot)] = Vector3(point[0], point[1], point[2]);
-        }
-        return latticeVectors;
+    for(int templateSlot = 0; templateSlot < numNeighbors; ++templateSlot){
+        const int canonicalSlot = simpleCubic
+            ? kSimpleCubicTemplateToCanonicalNeighborSlot[static_cast<std::size_t>(templateSlot)]
+            : templateSlot;
+        const double* point = points[templateSlot + 1];
+        latticeVectors[static_cast<std::size_t>(canonicalSlot)] = Vector3(point[0], point[1], point[2]);
     }
 
-    for(int neighborSlot = 0; neighborSlot < numNeighbors; ++neighborSlot){
-        const double* point = points[neighborSlot + 1];
-        latticeVectors[static_cast<std::size_t>(neighborSlot)] = Vector3(point[0], point[1], point[2]);
-    }
-
-    if(static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::BCC){
-        double maxAbsComponent = 0.0;
-        for(const Vector3& vector : latticeVectors){
-            maxAbsComponent = std::max(maxAbsComponent, std::abs(vector.x()));
-            maxAbsComponent = std::max(maxAbsComponent, std::abs(vector.y()));
-            maxAbsComponent = std::max(maxAbsComponent, std::abs(vector.z()));
-        }
-
-        if(maxAbsComponent > EPSILON){
-            for(Vector3& vector : latticeVectors){
-                vector /= maxAbsComponent;
-            }
+    const double templateDistance = shortestVectorLength(latticeVectors);
+    const double canonicalDistance = canonicalNearestNeighborDistance(structureType);
+    if(templateDistance > EPSILON && canonicalDistance > EPSILON){
+        const double templateToCanonical = canonicalDistance / templateDistance;
+        for(Vector3& vector : latticeVectors){
+            vector *= templateToCanonical;
         }
     }
 
