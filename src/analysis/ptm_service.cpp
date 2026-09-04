@@ -384,11 +384,7 @@ json PolyhedralTemplateMatchingService::compute(
                 return AnalysisResult::failure(frameError);
             }
 
-            if(!JsonUtils::writeJsonToParquet(result, analysisPath, false)){
-                atomsExportFuture.wait();
-                return AnalysisResult::failure("Failed to write " + analysisPath);
-            }
-
+            JsonUtils::writeJsonToParquet(result, analysisPath, false);
             atomsExportFuture.get();
         }else if(!AnalysisPipelineUtils::appendClusterOutputs(
             frame,
