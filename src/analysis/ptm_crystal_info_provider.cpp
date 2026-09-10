@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace Volt::PtmStructureAnalysisDetail{
@@ -128,30 +129,85 @@ double canonicalNearestNeighborDistance(int structureType){
     return shortestVectorLength(CoordinationStructures::getCoordStruct(structureType).latticeVectors);
 }
 
-std::vector<Vector3> buildCanonicalLatticeVectors(int structureType, const ptm::refdata_t& ref){
+inline constexpr double kLatticeVectorMatchTolerance = 1e-6;
+
+Vector3 templatePoint(const ptm::refdata_t& ref, int templateIndex, int templateSlot){
+    const double* point = ref.points[templateIndex][templateSlot + 1];
+    return Vector3(point[0], point[1], point[2]);
+}
+
+int symmetryTemplateIndex(const ptm::refdata_t& ref, int mappingIndex){
+    if(ref.num_conventional_mappings > 0 && ref.template_indices != nullptr){
+        return ref.template_indices[mappingIndex];
+    }
+    return 0;
+}
+
+int templateCount(const ptm::refdata_t& ref){
+    int count = canonicalTemplateIndex(ref) + 1;
+    const int mappingCount = symmetryMappingCount(ref);
+    for(int mappingIndex = 0; mappingIndex < mappingCount; ++mappingIndex){
+        count = std::max(count, symmetryTemplateIndex(ref, mappingIndex) + 1);
+    }
+    return count;
+}
+
+int findLatticeVector(const std::vector<Vector3>& latticeVectors, const Vector3& vector){
+    for(std::size_t index = 0; index < latticeVectors.size(); ++index){
+        if(latticeVectors[index].equals(vector, kLatticeVectorMatchTolerance)){
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+double canonicalScaleFactor(int structureType, const ptm::refdata_t& ref){
+    const int canonicalTemplate = canonicalTemplateIndex(ref);
+    std::vector<Vector3> templateVectors;
+    templateVectors.reserve(static_cast<std::size_t>(ref.num_nbrs));
+    for(int templateSlot = 0; templateSlot < ref.num_nbrs; ++templateSlot){
+        templateVectors.push_back(templatePoint(ref, canonicalTemplate, templateSlot));
+    }
+
+    const double templateDistance = shortestVectorLength(templateVectors);
+    const double canonicalDistance = canonicalNearestNeighborDistance(structureType);
+    if(templateDistance > EPSILON && canonicalDistance > EPSILON){
+        return canonicalDistance / templateDistance;
+    }
+    return 1.0;
+}
+
+std::vector<Vector3> buildCanonicalLatticeVectors(int structureType, const ptm::refdata_t& ref, double scale){
     const int numNeighbors = ref.num_nbrs;
     const bool simpleCubic = static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::SC;
-    const double (*points)[3] = ref.points[canonicalTemplateIndex(ref)];
+    const int canonicalTemplate = canonicalTemplateIndex(ref);
     std::vector<Vector3> latticeVectors(static_cast<std::size_t>(numNeighbors), Vector3::Zero());
 
     for(int templateSlot = 0; templateSlot < numNeighbors; ++templateSlot){
         const int canonicalSlot = simpleCubic
             ? kSimpleCubicTemplateToCanonicalNeighborSlot[static_cast<std::size_t>(templateSlot)]
             : templateSlot;
-        const double* point = points[templateSlot + 1];
-        latticeVectors[static_cast<std::size_t>(canonicalSlot)] = Vector3(point[0], point[1], point[2]);
-    }
-
-    const double templateDistance = shortestVectorLength(latticeVectors);
-    const double canonicalDistance = canonicalNearestNeighborDistance(structureType);
-    if(templateDistance > EPSILON && canonicalDistance > EPSILON){
-        const double templateToCanonical = canonicalDistance / templateDistance;
-        for(Vector3& vector : latticeVectors){
-            vector *= templateToCanonical;
-        }
+        latticeVectors[static_cast<std::size_t>(canonicalSlot)] =
+            templatePoint(ref, canonicalTemplate, templateSlot) * scale;
     }
 
     return latticeVectors;
+}
+
+void appendAlternateTemplateVectors(const ptm::refdata_t& ref, double scale, std::vector<Vector3>& latticeVectors){
+    const int canonicalTemplate = canonicalTemplateIndex(ref);
+    const int count = templateCount(ref);
+    for(int templateIndex = 0; templateIndex < count; ++templateIndex){
+        if(templateIndex == canonicalTemplate){
+            continue;
+        }
+        for(int templateSlot = 0; templateSlot < ref.num_nbrs; ++templateSlot){
+            const Vector3 vector = templatePoint(ref, templateIndex, templateSlot) * scale;
+            if(findLatticeVector(latticeVectors, vector) < 0){
+                latticeVectors.push_back(vector);
+            }
+        }
+    }
 }
 
 std::vector<int> buildTemplateToCanonicalMapping(int structureType, int count){
@@ -164,23 +220,35 @@ std::vector<int> buildTemplateToCanonicalMapping(int structureType, int count){
     return identityMapping(count);
 }
 
-std::vector<int> buildSymmetryPermutation(int structureType, const ptm::refdata_t& ref, int mappingIndex){
+std::vector<int> buildSymmetryPermutation(
+    int structureType,
+    const ptm::refdata_t& ref,
+    int mappingIndex,
+    double scale,
+    const std::vector<Vector3>& latticeVectors
+){
     const int numNeighbors = ref.num_nbrs;
+    const int templateIndex = symmetryTemplateIndex(ref, mappingIndex);
     const int8_t* mapping = symmetryMappings(ref)[mappingIndex];
-    std::vector<int> permutation(static_cast<std::size_t>(numNeighbors), 0);
+    const bool simpleCubic = static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::SC;
+    std::vector<int> permutation(static_cast<std::size_t>(numNeighbors), -1);
 
-    if(static_cast<StructureType>(normalizedStructureType(structureType)) == StructureType::SC){
-        for(int canonicalSlot = 0; canonicalSlot < numNeighbors; ++canonicalSlot){
-            const int templateSlot = kSimpleCubicCanonicalToTemplateSlot[static_cast<std::size_t>(canonicalSlot)];
-            const int mappedTemplateSlot = mapping[templateSlot + 1] - 1;
-            permutation[static_cast<std::size_t>(canonicalSlot)] =
-                kSimpleCubicTemplateToCanonicalNeighborSlot[static_cast<std::size_t>(mappedTemplateSlot)];
+    for(int canonicalSlot = 0; canonicalSlot < numNeighbors; ++canonicalSlot){
+        const int templateSlot = simpleCubic
+            ? kSimpleCubicCanonicalToTemplateSlot[static_cast<std::size_t>(canonicalSlot)]
+            : canonicalSlot;
+        const int mappedTemplateSlot = mapping[templateSlot + 1] - 1;
+        const int latticeVectorIndex = findLatticeVector(
+            latticeVectors,
+            templatePoint(ref, templateIndex, mappedTemplateSlot) * scale
+        );
+        if(latticeVectorIndex < 0){
+            throw std::runtime_error(
+                "PTM symmetry mapping " + std::to_string(mappingIndex) + " of " +
+                structureTypeName(structureType) + " points outside the lattice vector set."
+            );
         }
-        return permutation;
-    }
-
-    for(int neighborSlot = 0; neighborSlot < numNeighbors; ++neighborSlot){
-        permutation[static_cast<std::size_t>(neighborSlot)] = mapping[neighborSlot + 1] - 1;
+        permutation[static_cast<std::size_t>(canonicalSlot)] = latticeVectorIndex;
     }
     return permutation;
 }
@@ -215,9 +283,10 @@ std::array<int, 3> findNonCoplanarIndices(const std::vector<Vector3>& latticeVec
 
 std::vector<std::array<int, 2>> buildCommonNeighbors(
     int structureType,
-    const std::vector<Vector3>& latticeVectors
+    const std::vector<Vector3>& latticeVectors,
+    int coordinationNumber
 ){
-    const int numNeighbors = static_cast<int>(latticeVectors.size());
+    const int numNeighbors = coordinationNumber;
     std::vector<std::array<int, 2>> commonNeighbors(
         static_cast<std::size_t>(numNeighbors),
         std::array<int, 2>{-1, -1}
@@ -314,8 +383,10 @@ PtmCrystalData buildCrystalData(int structureType){
 
     data.coordinationNumber = ref->num_nbrs;
     data.templateToCanonicalNeighborSlot = buildTemplateToCanonicalMapping(structureType, data.coordinationNumber);
-    data.latticeVectors = buildCanonicalLatticeVectors(structureType, *ref);
-    data.commonNeighbors = buildCommonNeighbors(structureType, data.latticeVectors);
+    const double scale = canonicalScaleFactor(structureType, *ref);
+    data.latticeVectors = buildCanonicalLatticeVectors(structureType, *ref, scale);
+    appendAlternateTemplateVectors(*ref, scale, data.latticeVectors);
+    data.commonNeighbors = buildCommonNeighbors(structureType, data.latticeVectors, data.coordinationNumber);
 
     const auto basisIndices = findNonCoplanarIndices(data.latticeVectors);
     Matrix3 basis = Matrix3::Zero();
@@ -328,7 +399,7 @@ PtmCrystalData buildCrystalData(int structureType){
     data.symmetries.reserve(static_cast<std::size_t>(count));
     for(int mappingIndex = 0; mappingIndex < count; ++mappingIndex){
         PtmSymmetryPermutation symmetry;
-        symmetry.permutation = buildSymmetryPermutation(structureType, *ref, mappingIndex);
+        symmetry.permutation = buildSymmetryPermutation(structureType, *ref, mappingIndex, scale, data.latticeVectors);
         symmetry.transformation = Matrix3::Zero();
         symmetry.transformation.column(0) = data.latticeVectors[
             static_cast<std::size_t>(symmetry.permutation[static_cast<std::size_t>(basisIndices[0])])
