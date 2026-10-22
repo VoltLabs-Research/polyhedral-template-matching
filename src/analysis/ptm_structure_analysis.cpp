@@ -6,6 +6,7 @@
 #include <volt/matcher/template_matcher.h>
 #include <volt/topology/crystal_coordination_topology_init.h>
 #include <volt/analysis/nearest_neighbor_finder.h>
+#include <volt/core/progress.h>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_for.h>
@@ -114,11 +115,13 @@ void determineLocalStructuresWithPTM(
 
     PTM ptm;
     const bool collectPerAtomState = static_cast<bool>(atomStates);
+    const Stopwatch neighborTimer;
     if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags, particleTypes)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
     spdlog::debug("PTM: searching structure families 0x{:x} (input lattice {})",
                   ptm.ptmCheckFlags(), latticeStructureTypeName(context.inputCrystalType));
+    spdlog::info("  Nearest neighbors ready ({} per atom) in {}", PTM::MAX_INPUT_NEIGHBORS, neighborTimer.elapsed());
 
     auto* neighborCountsData = context.neighborCounts->dataInt();
     auto* structureTypesData = context.structureTypes->dataInt();
@@ -157,12 +160,15 @@ void determineLocalStructuresWithPTM(
     };
     tbb::enumerable_thread_specific<RejectedRmsdTally> rejectedRmsdTallies;
 
+    ProgressReporter orderingProgress("  Ordering neighbors", N);
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
         PTM::Kernel& kernel = kernels.local();
         for(size_t i = range.begin(); i < range.end(); ++i){
             kernel.cacheNeighbors(i, &cached[i]);
         }
+        orderingProgress.advance(range.size());
     });
+    spdlog::info("  Neighbor ordering done in {}", orderingProgress.elapsed());
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
         PTM::Kernel& kernel = kernels.local();

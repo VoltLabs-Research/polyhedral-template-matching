@@ -1,5 +1,6 @@
 #include <volt/analysis/ptm.h>
 #include <volt/math/affine_transformation.h>
+#include <volt/core/progress.h>
 
 #include <cassert>
 #include <cstring> 
@@ -167,6 +168,7 @@ bool PTM::prepare(
     _cachedNeighborCounts.assign(particleCount, 0);
     _cachedNeighborIndices.assign(particleCount * static_cast<size_t>(MAX_INPUT_NEIGHBORS), -1);
 
+    ProgressReporter progress("  Finding nearest neighbors", particleCount);
     tbb::parallel_for(tbb::blocked_range<size_t>(0, particleCount), [&](const tbb::blocked_range<size_t>& range){
         NearestNeighborFinder::Query<MAX_INPUT_NEIGHBORS> query(*this);
         for(size_t i = range.begin(); i < range.end(); ++i){
@@ -179,6 +181,7 @@ bool PTM::prepare(
                     static_cast<int>(query.results()[neighborIndex].index);
             }
         }
+        progress.advance(range.size());
     });
 
     return true;
