@@ -229,7 +229,10 @@ json PolyhedralTemplateMatchingService::compute(
             }
         }
 
+        const Stopwatch clusterTimer;
         if(clusterTemplates){
+            spdlog::info("Joining user-template atoms into grains by orientation (misorientation tolerance {} deg)",
+                         _cationMisorientation);
             analysis.setCrystalInfoProvider(
                 std::make_shared<TemplateCrystalInfoProvider>(
                     PtmStructureAnalysisDetail::ptmCrystalInfoProvider(),
@@ -258,14 +261,17 @@ json PolyhedralTemplateMatchingService::compute(
                 )
             );
         }else if(context.inputCrystalType == LATTICE_SC){
+            spdlog::info("Using the PTM-orientation cluster rule for the SC input lattice");
             analysis.setClusterRuleProvider(
                 std::make_shared<OrientationClusterRuleProvider>(buildOrientationClusterStates(ptmAtomStates))
             );
         }
 
+        spdlog::info("Building clusters{}...", _dissolveSmallClusters ? " (small clusters are dissolved)" : "");
         ClusterBuilder clusterBuilder(analysis, context);
         clusterBuilder.build(_dissolveSmallClusters);
         normalizeReconstructedClusterGraphForExport(analysis, context);
+        spdlog::info("Built {} clusters in {}", analysis.clusterGraph().clusters().size() - 1, clusterTimer.elapsed());
 
         for(const auto& [atomIndex, type] : matchedTypes){
             context.structureTypes->setInt(atomIndex, type);
