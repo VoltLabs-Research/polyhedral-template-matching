@@ -335,6 +335,7 @@ void determineLocalStructuresWithPTM(
         context.inputCrystalType == LATTICE_CUBIC_DIAMOND ||
         context.inputCrystalType == LATTICE_HEX_DIAMOND
     ){
+        ProgressReporter diamondProgress("  Reordering diamond neighbor shells", N);
         ensureCoordinationStructuresInitialized();
         canonicalDiamondNeighbors.resize(N);
         canonicalDiamondShellValid.assign(N, 0);
@@ -387,8 +388,11 @@ void determineLocalStructuresWithPTM(
                     }
                 }
             }
+            diamondProgress.advance(range.size());
         });
 
+        std::size_t orderedDiamondAtoms = 0;
+        std::size_t demotedDiamondAtoms = 0;
         for(size_t i = 0; i < N; ++i){
             const int structureType = structureTypesData[i];
             if(
@@ -399,16 +403,21 @@ void determineLocalStructuresWithPTM(
             }
 
             if(canonicalDiamondShellValid[i]){
+                ++orderedDiamondAtoms;
                 continue;
             }
 
+            ++demotedDiamondAtoms;
             structureTypesData[i] = LATTICE_OTHER;
             neighborCountsData[i] = 0;
             localCounts[i] = 0;
         }
+        spdlog::info("  Diamond neighbor shells reordered by CNA in {}: {} atoms kept, {} set to Other",
+                     diamondProgress.elapsed(), orderedDiamondAtoms, demotedDiamondAtoms);
     }
 
     if(buildCationNetwork){
+        ProgressReporter cationProgress("  Building template-atom network", N);
         cationNeighbors.assign(N, std::array<int, MAX_NEIGHBORS>{});
         for(auto& row : cationNeighbors){
             row.fill(-1);
@@ -447,9 +456,12 @@ void determineLocalStructuresWithPTM(
                 localCounts[i] = count;
                 neighborCountsData[i] = count;
             }
+            cationProgress.advance(range.size());
         });
+        spdlog::info("  Template-atom network built in {} (radius {} A)", cationProgress.elapsed(), cationNeighborRadius);
     }
 
+    ProgressReporter neighborListProgress("  Building neighbor lists", N);
     auto* offsets = context.neighborOffsets->dataInt();
     offsets[0] = 0;
     for(size_t i = 0; i < N; ++i){
@@ -569,12 +581,15 @@ void determineLocalStructuresWithPTM(
                 }
             }
 
+            neighborListProgress.advance(range.size());
             return maxSoFar;
         },
         [](double left, double right) -> double {
             return std::max(left, right);
         }
     );
+    spdlog::info("  Neighbor lists built in {}: {} entries, max neighbor distance {:.3f}",
+                 neighborListProgress.elapsed(), totalNeighbors, context.maximumNeighborDistance);
 }
 
 }
