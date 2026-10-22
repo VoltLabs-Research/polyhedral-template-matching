@@ -23,6 +23,8 @@
 #include <volt/structures/crystal_structure_types.h>
 
 #include <cctype>
+#include <cstdio>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -66,6 +68,18 @@ std::shared_ptr<std::vector<OrientationClusterAtomState>> buildOrientationCluste
         }
     }
     return states;
+}
+
+static void appendCountSummary(std::string& summary, const std::string& name, std::int64_t count, std::size_t total){
+    char percent[32];
+    std::snprintf(percent, sizeof(percent), " (%.1f%%)", percentOf(static_cast<std::uint64_t>(count), total));
+    if(!summary.empty()){
+        summary += ", ";
+    }
+    summary += name;
+    summary += ' ';
+    summary += std::to_string(count);
+    summary += percent;
 }
 
 PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
@@ -282,6 +296,22 @@ json PolyhedralTemplateMatchingService::compute(
             structureCounts[context.structureTypes ? context.structureTypes->getInt(atomIndex) : 0]++;
         }
 
+        std::string structureSummary;
+        for(const auto& [structureType, count] : structureCounts){
+            if(structureType == StructureType::OTHER){
+                continue;
+            }
+            const std::string templateName = templates.structureName(structureType);
+            appendCountSummary(structureSummary, templateName.empty() ? structureTypeName(structureType) : templateName,
+                               count, context.atomCount());
+        }
+        if(const auto other = structureCounts.find(StructureType::OTHER); other != structureCounts.end()){
+            appendCountSummary(structureSummary, structureTypeName(StructureType::OTHER), other->second, context.atomCount());
+        }
+        if(!structureSummary.empty()){
+            spdlog::info("Structure types: {}", structureSummary);
+        }
+
         json result = AnalysisResult::success();
         result["main_listing"] = {
             {"total_atoms", frame.natoms},
@@ -325,6 +355,19 @@ json PolyhedralTemplateMatchingService::compute(
                 });
             }
             result["sub_listings"]["ordering_counts"] = std::move(orderingCountRows);
+
+            std::string orderingSummary;
+            for(const auto& [orderingType, count] : orderingCounts){
+                if(orderingType != static_cast<int>(PTM::OrderingType::ORDERING_NONE)){
+                    appendCountSummary(orderingSummary, PTM::orderingTypeName(orderingType), count, context.atomCount());
+                }
+            }
+            if(const auto none = orderingCounts.find(static_cast<int>(PTM::OrderingType::ORDERING_NONE)); none != orderingCounts.end()){
+                appendCountSummary(orderingSummary, PTM::orderingTypeName(none->first), none->second, context.atomCount());
+            }
+            if(!orderingSummary.empty()){
+                spdlog::info("Ordering types: {}", orderingSummary);
+            }
         }
 
         result["per-atom-properties"] = json::array();
@@ -334,9 +377,23 @@ json PolyhedralTemplateMatchingService::compute(
             const std::size_t atomCount = context.atomCount();
             auto rmsdProperty = std::make_shared<ParticleProperty>(atomCount, DataType::Double, 1, 0, true);
             double* rmsdData = rmsdProperty->dataDouble();
+            std::size_t rmsdAtoms = 0;
+            double rmsdSum = 0.0;
+            double rmsdMin = std::numeric_limits<double>::infinity();
+            double rmsdMax = 0.0;
             for(std::size_t atomIndex = 0; atomIndex < atomCount; ++atomIndex){
                 rmsdData[atomIndex] = (atomIndex < ptmAtomStates->size() && (*ptmAtomStates)[atomIndex].valid)
                     ? (*ptmAtomStates)[atomIndex].rmsd : -1.0;
+                if(rmsdData[atomIndex] >= 0.0){
+                    ++rmsdAtoms;
+                    rmsdSum += rmsdData[atomIndex];
+                    rmsdMin = std::min(rmsdMin, rmsdData[atomIndex]);
+                    rmsdMax = std::max(rmsdMax, rmsdData[atomIndex]);
+                }
+            }
+            if(rmsdAtoms > 0){
+                spdlog::info("RMSD of matched atoms: min {:.4f}, mean {:.4f}, max {:.4f}",
+                             rmsdMin, rmsdSum / static_cast<double>(rmsdAtoms), rmsdMax);
             }
             extraDumpColumns.push_back({ "rmsd", rmsdProperty });
         }
