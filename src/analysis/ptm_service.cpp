@@ -203,10 +203,14 @@ json PolyhedralTemplateMatchingService::compute(
         }
 
         PtmRmsdCutoffReport rmsdCutoffReport;
+        spdlog::info("Running PTM on {} atoms (RMSD cutoff {}{})...",
+                     context.atomCount(), _rmsd, identifyOrdering ? ", identifying chemical ordering" : "");
+        const Stopwatch ptmTimer;
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
                                         _structureCheckFlags,
                                         identifyOrdering ? frame.types.data() : nullptr,
                                         &rmsdCutoffReport);
+        spdlog::info("PTM finished in {}", ptmTimer.elapsed());
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),
