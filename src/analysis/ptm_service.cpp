@@ -403,6 +403,8 @@ json PolyhedralTemplateMatchingService::compute(
         if(!outputBase.empty()){
             const std::string analysisPath = outputBase + "_ptm_analysis.parquet";
             const std::string atomsPath = outputBase + "_atoms.parquet";
+            spdlog::info("Launching atoms data export...");
+            const Stopwatch atomsExportTimer;
 
             auto ptmColumnWriter = [&ptmAtomStates, identifyOrdering](ColumnarAtomWriter& writer, std::size_t atomIndex, int){
                 if(atomIndex >= ptmAtomStates->size()){
@@ -444,6 +446,8 @@ json PolyhedralTemplateMatchingService::compute(
                 }
             );
 
+            spdlog::info("Writing annotated dump and cluster tables for DXA...");
+            const Stopwatch clusterOutputsTimer;
             if(!AnalysisPipelineUtils::appendClusterOutputs(
                 frame,
                 outputBase,
@@ -457,9 +461,15 @@ json PolyhedralTemplateMatchingService::compute(
                 atomsExportFuture.wait();
                 return AnalysisResult::failure(frameError);
             }
+            spdlog::info("Cluster outputs written in {}: annotated dump, clusters table, cluster transitions table, neighbor lattice",
+                         clusterOutputsTimer.elapsed());
 
             JsonUtils::writeJsonToParquet(result, analysisPath, false);
+            spdlog::info("Summary parquet written to {}", analysisPath);
+            const Stopwatch atomsExportWait;
             atomsExportFuture.get();
+            spdlog::info("Exported atoms data to: {} ({} after launch, {} spent waiting for it)",
+                         atomsPath, atomsExportTimer.elapsed(), atomsExportWait.elapsed());
         }else if(!AnalysisPipelineUtils::appendClusterOutputs(
             frame,
             outputBase,
