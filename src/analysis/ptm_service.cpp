@@ -18,6 +18,7 @@
 #include <volt/core/analysis_result.h>
 #include <volt/core/frame_adapter.h>
 #include <volt/core/particle_property.h>
+#include <volt/core/progress.h>
 
 #include <volt/structures/crystal_structure_types.h>
 
@@ -179,15 +180,21 @@ json PolyhedralTemplateMatchingService::compute(
 
         TemplateMatcher templates;
         if(!_latticeDirectory.empty()){
+            const Stopwatch templatesTimer;
             const int loaded = templates.loadDirectory(_latticeDirectory);
             if(loaded == 0){
                 spdlog::warn("PTM: no user templates loaded from '{}'", _latticeDirectory);
+            }else{
+                spdlog::info("Loaded {} user templates in {}", loaded, templatesTimer.elapsed());
             }
         }
 
         const TemplateMatcher* templatesPtr = templates.empty() ? nullptr : &templates;
         const bool clusterTemplates = (templatesPtr != nullptr && _cationNeighborRadius > 0.0);
         const double cationRadius = clusterTemplates ? _cationNeighborRadius : 0.0;
+        if(_cationNeighborRadius > 0.0 && !clusterTemplates){
+            spdlog::warn("PTM: --cation_radius {} ignored because no user templates are loaded", _cationNeighborRadius);
+        }
 
         const bool identifyOrdering = _identifyOrdering
             && frame.types.size() >= context.atomCount();
