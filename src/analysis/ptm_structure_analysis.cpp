@@ -17,9 +17,35 @@
 #include <array>
 #include <limits>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace Volt{
+
+static std::string structureFamilyNames(int checkFlags){
+    static const std::pair<int, StructureType> families[] = {
+        {PTM_CHECK_SC, StructureType::SC},
+        {PTM_CHECK_FCC, StructureType::FCC},
+        {PTM_CHECK_HCP, StructureType::HCP},
+        {PTM_CHECK_ICO, StructureType::ICO},
+        {PTM_CHECK_BCC, StructureType::BCC},
+        {PTM_CHECK_DCUB, StructureType::CUBIC_DIAMOND},
+        {PTM_CHECK_DHEX, StructureType::HEX_DIAMOND},
+        {PTM_CHECK_GRAPHENE, StructureType::GRAPHENE},
+    };
+
+    std::string names;
+    for(const auto& [flag, structureType] : families){
+        if(checkFlags & flag){
+            if(!names.empty()){
+                names += ", ";
+            }
+            names += structureTypeName(structureType);
+        }
+    }
+    return names.empty() ? std::string("none") : names;
+}
 
 bool setupPTM(StructureContext& context, PTM& ptm, size_t particleCount, bool collectDefGradient,
               int structureCheckFlags, const int* particleTypes){
@@ -119,8 +145,6 @@ void determineLocalStructuresWithPTM(
     if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags, particleTypes)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
-    spdlog::debug("PTM: searching structure families 0x{:x} (input lattice {})",
-                  ptm.ptmCheckFlags(), latticeStructureTypeName(context.inputCrystalType));
     spdlog::info("  Nearest neighbors ready ({} per atom) in {}", PTM::MAX_INPUT_NEIGHBORS, neighborTimer.elapsed());
 
     auto* neighborCountsData = context.neighborCounts->dataInt();
@@ -170,6 +194,9 @@ void determineLocalStructuresWithPTM(
     });
     spdlog::info("  Neighbor ordering done in {}", orderingProgress.elapsed());
 
+    spdlog::info("  Structure templates: {} (input lattice {})",
+                 structureFamilyNames(ptm.ptmCheckFlags()), latticeStructureTypeName(context.inputCrystalType));
+    ProgressReporter matchingProgress("  Matching templates", N);
     tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
         PTM::Kernel& kernel = kernels.local();
         double env[PTM_MAX_INPUT_POINTS][3];
@@ -263,7 +290,9 @@ void determineLocalStructuresWithPTM(
                 atomState.valid = true;
             }
         }
+        matchingProgress.advance(range.size());
     });
+    spdlog::info("  Template matching done for {} atoms in {}", N, matchingProgress.elapsed());
 
     {
         RejectedRmsdTally rejected;
@@ -294,7 +323,7 @@ void determineLocalStructuresWithPTM(
                 rmsdCutoffReport->smallestRejectedRmsd = rejected.smallest;
             }
             spdlog::info(
-                "PTM: {} of {} atoms ({:.1f}%) matched a lattice template but were discarded by --rmsd {} "
+                "  PTM: {} of {} atoms ({:.1f}%) matched a lattice template but were discarded by --rmsd {} "
                 "(smallest discarded RMSD {:.4f}, median {:.3f}); raise --rmsd to keep them",
                 rejected.count, N, 100.0 * static_cast<double>(rejected.count) / static_cast<double>(N),
                 rmsdCutoff, rejected.smallest, median
