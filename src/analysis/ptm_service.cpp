@@ -433,8 +433,14 @@ json PolyhedralTemplateMatchingService::compute(
                     return structureTypeName(structureType);
                 };
 
+            // Emscripten builds have no threads, so an async launch would never run.
+#if defined(__EMSCRIPTEN__)
+            constexpr auto atomsExportLaunch = std::launch::deferred;
+#else
+            constexpr auto atomsExportLaunch = std::launch::async;
+#endif
             atomsExportFuture = std::async(
-                std::launch::async,
+                atomsExportLaunch,
                 [&, atomsPath, ptmColumnWriter, nameResolver]{
                     StructureIdentificationExport::streamStructureIdentificationToParquet(
                         atomsPath,
