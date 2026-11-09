@@ -141,11 +141,20 @@ void determineLocalStructuresWithPTM(
 
     PTM ptm;
     const bool collectPerAtomState = static_cast<bool>(atomStates);
+    const bool reorderDiamondShells =
+        context.inputCrystalType == LATTICE_CUBIC_DIAMOND ||
+        context.inputCrystalType == LATTICE_HEX_DIAMOND;
+    const bool buildCationNetwork = (templates != nullptr && !templates->empty() && cationNeighborRadius > 0.0);
+
+    // Neighbor finding, neighbor ordering, template matching, diamond shell reordering, the
+    // template-atom network and the neighbor lists; a pass this run skips weighs nothing.
+    ProgressSteps steps({1.0, 2.0, 5.0, reorderDiamondShells ? 2.0 : 0.0, buildCationNetwork ? 1.0 : 0.0, 0.5});
     const Stopwatch neighborTimer;
     if(!setupPTM(context, ptm, N, collectPerAtomState, structureCheckFlags, particleTypes)){
         throw std::runtime_error("Error trying to initialize PTM.");
     }
     spdlog::info("  Nearest neighbors ready ({} per atom) in {}", PTM::MAX_INPUT_NEIGHBORS, neighborTimer.elapsed());
+    steps.next();
 
     auto* neighborCountsData = context.neighborCounts->dataInt();
     auto* structureTypesData = context.structureTypes->dataInt();
@@ -171,7 +180,6 @@ void determineLocalStructuresWithPTM(
     std::vector<std::array<int, MAX_NEIGHBORS>> canonicalDiamondNeighbors;
     std::vector<unsigned char> canonicalDiamondShellValid;
 
-    const bool buildCationNetwork = (templates != nullptr && !templates->empty() && cationNeighborRadius > 0.0);
     std::vector<std::array<int, MAX_NEIGHBORS>> cationNeighbors;
 
     tbb::enumerable_thread_specific<PTM::Kernel> kernels([&ptm]{ return PTM::Kernel(ptm); });
@@ -193,6 +201,7 @@ void determineLocalStructuresWithPTM(
         orderingProgress.advance(range.size());
     });
     spdlog::info("  Neighbor ordering done in {}", orderingProgress.elapsed());
+    steps.next();
 
     spdlog::info("  Structure templates: {} (input lattice {})",
                  structureFamilyNames(ptm.ptmCheckFlags()), latticeStructureTypeName(context.inputCrystalType));
@@ -293,6 +302,7 @@ void determineLocalStructuresWithPTM(
         matchingProgress.advance(range.size());
     });
     spdlog::info("  Template matching done for {} atoms in {}", N, matchingProgress.elapsed());
+    steps.next();
 
     {
         RejectedRmsdTally rejected;
@@ -331,11 +341,10 @@ void determineLocalStructuresWithPTM(
         }
     }
 
-    if(
-        context.inputCrystalType == LATTICE_CUBIC_DIAMOND ||
-        context.inputCrystalType == LATTICE_HEX_DIAMOND
-    ){
+    if(reorderDiamondShells){
         ProgressReporter diamondProgress("  Reordering diamond neighbor shells", N);
+        // Indexing the atoms for the CNA ordering, then the reordering itself.
+        ProgressSteps diamondSteps({1.0, 2.0});
         ensureCoordinationStructuresInitialized();
         canonicalDiamondNeighbors.resize(N);
         canonicalDiamondShellValid.assign(N, 0);
@@ -354,6 +363,7 @@ void determineLocalStructuresWithPTM(
         if(!diamondOrderingFinder.prepare(context.positions, context.simCell)){
             throw std::runtime_error("Error trying to prepare PTM diamond ordering finder.");
         }
+        diamondSteps.next("Reordering diamond neighbor shells");
 
         tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto& range){
             for(size_t i = range.begin(); i < range.end(); ++i){
@@ -415,9 +425,12 @@ void determineLocalStructuresWithPTM(
         spdlog::info("  Diamond neighbor shells reordered by CNA in {}: {} atoms kept, {} set to Other",
                      diamondProgress.elapsed(), orderedDiamondAtoms, demotedDiamondAtoms);
     }
+    steps.next();
 
     if(buildCationNetwork){
         ProgressReporter cationProgress("  Building template-atom network", N);
+        // Indexing the atoms for the cation search, then the search itself.
+        ProgressSteps cationSteps({1.0, 2.0});
         cationNeighbors.assign(N, std::array<int, MAX_NEIGHBORS>{});
         for(auto& row : cationNeighbors){
             row.fill(-1);
@@ -429,6 +442,7 @@ void determineLocalStructuresWithPTM(
         if(!cationFinder.prepare(context.positions, context.simCell)){
             throw std::runtime_error("Error preparing cation-network neighbour finder.");
         }
+        cationSteps.next("Building template-atom network");
         
         tbb::parallel_for(tbb::blocked_range<size_t>(0, N), [&](const auto &range){
             NearestNeighborFinder::Query<kCationCapacity> query(cationFinder);
@@ -460,6 +474,7 @@ void determineLocalStructuresWithPTM(
         });
         spdlog::info("  Template-atom network built in {} (radius {} A)", cationProgress.elapsed(), cationNeighborRadius);
     }
+    steps.next();
 
     ProgressReporter neighborListProgress("  Building neighbor lists", N);
     auto* offsets = context.neighborOffsets->dataInt();

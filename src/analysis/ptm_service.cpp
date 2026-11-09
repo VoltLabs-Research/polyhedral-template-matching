@@ -192,6 +192,9 @@ json PolyhedralTemplateMatchingService::compute(
         StructureAnalysis analysis(context);
         auto ptmAtomStates = std::make_shared<std::vector<PtmLocalAtomState>>();
 
+        // PTM, cluster building, symmetry canonicalization and outputs. The outputs weigh more than
+        // in a serial plugin: PTM runs in parallel, the neighbor lattice export does not.
+        ProgressSteps steps({4.0, 2.0, 1.0, 3.0});
         TemplateMatcher templates;
         if(!_latticeDirectory.empty()){
             const Stopwatch templatesTimer;
@@ -225,6 +228,7 @@ json PolyhedralTemplateMatchingService::compute(
                                         identifyOrdering ? frame.types.data() : nullptr,
                                         &rmsdCutoffReport);
         spdlog::info("PTM finished in {}", ptmTimer.elapsed());
+        steps.next("Building clusters");
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),
@@ -284,8 +288,10 @@ json PolyhedralTemplateMatchingService::compute(
         spdlog::info("Building clusters{}...", _dissolveSmallClusters ? " (small clusters are dissolved)" : "");
         ClusterBuilder clusterBuilder(analysis, context);
         clusterBuilder.build(_dissolveSmallClusters);
+        steps.next("Canonicalizing cluster symmetry");
         normalizeReconstructedClusterGraphForExport(analysis, context);
         spdlog::info("Built {} clusters in {}", analysis.clusterGraph().clusters().size() - 1, clusterTimer.elapsed());
+        steps.next("Writing outputs");
 
         for(const auto& [atomIndex, type] : matchedTypes){
             context.structureTypes->setInt(atomIndex, type);
