@@ -79,20 +79,25 @@ public:
         _inputCrystalStructure = structureType;
     }
 
+    // Templates searched when --ptm_structures is empty: only the input crystal and the
+    // structure its planar defects are made of (stacking faults and twins of FCC are HCP and
+    // the reverse; the same for cubic and hexagonal diamond), as in OVITO's DXA.
+    // Every other template turns distorted crystal atoms (thermal noise, dislocation cores)
+    // into one-atom clusters of a foreign lattice whose transitions break the Burgers
+    // circuits: a heated BCC Fe loop came out in 9-24 segments with the old one-shell
+    // default (SC|FCC|HCP|ICO|BCC) and in 1 segment with BCC alone.
     static int defaultCheckFlagsForLattice(LatticeStructureType inputStructure){
-        constexpr int oneShellFamily =
-            PTM_CHECK_SC | PTM_CHECK_FCC | PTM_CHECK_HCP | PTM_CHECK_ICO | PTM_CHECK_BCC;
-        constexpr int diamondFamily = PTM_CHECK_DCUB | PTM_CHECK_DHEX;
-
         switch(inputStructure){
             case LATTICE_SC:
+                return PTM_CHECK_SC;
             case LATTICE_FCC:
             case LATTICE_HCP:
+                return PTM_CHECK_FCC | PTM_CHECK_HCP;
             case LATTICE_BCC:
-                return oneShellFamily;
+                return PTM_CHECK_BCC;
             case LATTICE_CUBIC_DIAMOND:
             case LATTICE_HEX_DIAMOND:
-                return oneShellFamily | diamondFamily;
+                return PTM_CHECK_DCUB | PTM_CHECK_DHEX;
             default:
                 break;
         }
