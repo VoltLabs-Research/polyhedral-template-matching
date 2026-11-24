@@ -5,6 +5,7 @@ Runs PTM, exports the per-atom structure type, and generates the cluster-graph a
 ## Install
 
 ```bash
+npm install -g @voltstack/vpm
 vpm install @voltlabs/polyhedral-template-matching
 ```
 
