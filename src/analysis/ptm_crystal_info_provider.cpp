@@ -21,11 +21,6 @@ namespace Volt::PtmStructureAnalysisDetail{
 inline constexpr std::array<int, 6> kSimpleCubicCanonicalToTemplateSlot = {5, 4, 3, 2, 1, 0};
 inline constexpr std::array<int, 6> kSimpleCubicTemplateToCanonicalNeighborSlot = {5, 4, 3, 2, 1, 0};
 
-const Vector3& zeroVector(){
-    static const Vector3 vector = Vector3::Zero();
-    return vector;
-}
-
 int normalizedStructureType(int structureType){
     switch(static_cast<StructureType>(structureType)){
         case StructureType::CUBIC_DIAMOND_FIRST_NEIGH:

@@ -4,28 +4,14 @@
 #include <volt/matcher/template_matcher.h>
 #include <volt/structures/cluster.h>
 
-#include <spdlog/spdlog.h>
-
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
 namespace Volt{
 
-double traceOf(const Matrix3& matrix){
-    return matrix(0, 0) + matrix(1, 1) + matrix(2, 2);
-}
-
-double misorientationAngle(const Matrix3& a, const Matrix3& b){
-    const Matrix3 relative = Matrix3(a.transposed() * b);
-    double cosine = (traceOf(relative) - 1.0) / 2.0;
-    if(cosine > 1.0){
-        cosine = 1.0;
-    }
-    if(cosine < -1.0){
-        cosine = -1.0;
-    }
-    return std::acos(cosine);
+double OrientationBasedClusterRule::misorientationAngle(const Matrix3& a, const Matrix3& b){
+    return Matrix3(a.transposed() * b).rotationAngle();
 }
 
 OrientationBasedClusterRule::OrientationBasedClusterRule(
@@ -94,10 +80,7 @@ OrientationBasedClusterRule::OrientationBasedClusterRule(
     }
 
     _referenceAngles.push_back(0.0);
-
-    spdlog::info("PTM: {} cation pairs, {} reference angles kept, covering {}/{} pairs ({:.1f}%)",
-                 pairCount, _referenceAngles.size(), covered, std::max<long>(pairCount, 1),
-                 pairCount > 0 ? 100.0 * covered / pairCount : 0.0);
+    _angleFit = AngleFit{pairCount, covered};
 }
 
 const OrientationBasedAtomState* OrientationBasedClusterRule::stateFor(int atomIndex) const{

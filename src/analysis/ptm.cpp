@@ -227,13 +227,7 @@ Quaternion PTM::Kernel::orientation() const{
     );
 }
 
-struct ptmnbrdata_t{
-    const PTM* neighFinder;
-    const int* particleTypes;
-    const std::vector<uint64_t>* cachedNeighbors;
-};
-
-static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested, ptm_atomicenv_t* env){
+int PTM::getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested, ptm_atomicenv_t* env){
     auto* neighborData = static_cast<ptmnbrdata_t*>(vdata);
     const PTM* finder = neighborData->neighFinder;
     const int* particleTypes = neighborData->particleTypes;

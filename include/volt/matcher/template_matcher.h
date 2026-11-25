@@ -6,6 +6,7 @@
 #include <ptm_constants.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -52,11 +53,33 @@ struct TemplateMatch{
     std::array<std::int8_t, PTM_MAX_POINTS> mapping{};
 };
 
+// What loadDirectory() made of a directory of template files: whether it exists, and each file it read, in order,
+// with the template it loaded from it or the reason it was skipped.
+struct TemplateDirectory{
+    struct File{
+        std::string path;
+        // False when the file could not be read as a template definition.
+        bool read = false;
+        std::string templateName;
+        // Empty when the template was loaded.
+        std::string error;
+        int coordinationNumber = 0;
+        std::size_t graphs = 0;
+        int structureType = -1;
+    };
+
+    std::string path;
+    bool found = false;
+    std::vector<File> files;
+
+    std::size_t loadedTemplates() const;
+};
+
 class TemplateMatcher{
 public:
     TemplateMatcher() = default;
 
-    int loadDirectory(const std::filesystem::path &directory);
+    TemplateDirectory loadDirectory(const std::filesystem::path &directory);
 
     bool addTemplate(
         const TemplateDefinition& definition,
@@ -83,6 +106,21 @@ private:
         LoadedTemplate& out,
         std::string* error
     ) const;
+
+    // The template's points and their graph, and the RMSD fit of a neighborhood onto them; the template file reader.
+    static double calcRmsd(int numPoints, const double (*idealPoints)[3],
+                           double (*normalized)[3], std::int8_t* mapping,
+                           double* quaternionOut, double* scaleOut);
+    static std::array<double, 3> quatRotate(const double* quaternion, const std::array<double, 3>& vector);
+    static std::vector<std::array<double, 3>> buildTemplatePoints(const TemplateDefinition& definition);
+    static void enumerateAutomorphisms(int neighborCount, const bool adjacency[PTM_MAX_NBRS][PTM_MAX_NBRS],
+                                       const std::int8_t* degree,
+                                       std::vector<std::array<std::int8_t, PTM_MAX_POINTS>>& out);
+    static bool hullCanonical(int numPoints, const double (*points)[3], int wantFacets,
+                              std::int8_t facetsOut[PTM_MAX_FACETS][3], int& numFacetsOut,
+                              std::int8_t* degreeOut, std::int8_t* canonicalLabellingOut,
+                              std::uint64_t* hashOut, std::int8_t* codeOut, int* numEdgesOut);
+    static bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition& out, std::string* error);
 
     std::vector<LoadedTemplate> _templates;
 

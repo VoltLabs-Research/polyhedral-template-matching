@@ -4,16 +4,6 @@
 
 namespace Volt{
 
-const Vector3& zeroVector(){
-    static const Vector3 vector = Vector3::Zero();
-    return vector;
-}
-
-const Matrix3& identityMatrix(){
-    static const Matrix3 matrix = Matrix3::Identity();
-    return matrix;
-}
-
 TemplateCrystalInfoProvider::TemplateCrystalInfoProvider(
     std::shared_ptr<const StructureAnalysisCrystalInfo> builtin,
     const TemplateMatcher& matcher,

@@ -1,11 +1,11 @@
 #include <volt/analysis/reconstructed_analysis_pipeline.h>
 #include <volt/analysis/structure_analysis_context.h>
 #include <volt/analysis/cluster_graph_builder.h>
-#include <volt/analysis/cluster_graph_io.h>
 #include <volt/analysis/orientation_cluster_rule_provider.h>
 #include <volt/analysis/reconstructed_state_canonicalizer.h>
 #include <volt/analysis/structure_analysis.h>
 #include <volt/analysis/structure_identification_export.h>
+#include <volt/analysis/polyhedral_template_matching_log.h>
 #include <volt/analysis/ptm_service.h>
 #include <volt/analysis/ptm.h>
 #include <volt/analysis/ptm_structure_analysis.h>
@@ -16,19 +16,18 @@
 
 #include <volt/core/lammps_parser.h>
 #include <volt/core/analysis_result.h>
-#include <volt/core/frame_adapter.h>
 #include <volt/core/particle_property.h>
 #include <volt/core/progress.h>
+#include <volt/core/type_counts.h>
+#include <volt/cli/common.h>
+#include <volt/utilities/json_utils.h>
 
 #include <volt/structures/crystal_structure_types.h>
 
 #include <cctype>
-#include <cstdio>
-#include <limits>
 #include <string_view>
 #include <utility>
 
-#include <volt/utilities/json_utils.h>
 #include <volt/utilities/parquet_atom_writer.h>
 
 #include <spdlog/spdlog.h>
@@ -36,13 +35,10 @@
 #include <algorithm>
 #include <future>
 #include <map>
-#include <utility>
-#include <fstream>
-#include <sstream>
 
 namespace Volt{
 
-Matrix3 quaternionToMatrix(const Quaternion& orientation){
+Matrix3 PolyhedralTemplateMatchingService::quaternionToMatrix(const Quaternion& orientation){
     const Quaternion normalized = orientation.normalized();
     return Matrix3(
         normalized * Vector3(1.0, 0.0, 0.0),
@@ -51,7 +47,7 @@ Matrix3 quaternionToMatrix(const Quaternion& orientation){
     );
 }
 
-std::shared_ptr<std::vector<OrientationClusterAtomState>> buildOrientationClusterStates(
+std::shared_ptr<std::vector<OrientationClusterAtomState>> PolyhedralTemplateMatchingService::buildOrientationClusterStates(
     const std::shared_ptr<const std::vector<PtmLocalAtomState>>& atomStates
 ){
     if(!atomStates){
@@ -68,18 +64,6 @@ std::shared_ptr<std::vector<OrientationClusterAtomState>> buildOrientationCluste
         }
     }
     return states;
-}
-
-static void appendCountSummary(std::string& summary, const std::string& name, std::int64_t count, std::size_t total){
-    char percent[32];
-    std::snprintf(percent, sizeof(percent), " (%.1f%%)", percentOf(static_cast<std::uint64_t>(count), total));
-    if(!summary.empty()){
-        summary += ", ";
-    }
-    summary += name;
-    summary += ' ';
-    summary += std::to_string(count);
-    summary += percent;
 }
 
 PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
@@ -107,34 +91,21 @@ void PolyhedralTemplateMatchingService::setStructureCheckFlags(std::string famil
     };
 
     int flags = 0;
-    std::size_t start = 0;
-    while(start <= families.size()){
-        std::size_t comma = families.find(',', start);
-        if(comma == std::string::npos){
-            comma = families.size();
-        }
-        std::string token = families.substr(start, comma - start);
-        token.erase(0, token.find_first_not_of(" \t"));
-        const auto lastChar = token.find_last_not_of(" \t");
-        token.erase(lastChar == std::string::npos ? 0 : lastChar + 1);
+    for(std::string token : CLI::splitList(families, ',')){
         for(char& c : token){
             c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         }
-
-        if(!token.empty()){
-            bool matched = false;
-            for(const auto& [name, bit] : table){
-                if(token == name){
-                    flags |= bit;
-                    matched = true;
-                    break;
-                }
-            }
-            if(!matched){
-                spdlog::warn("PTM: unknown structure family '{}' in --ptm_structures, ignoring", token);
+        bool matched = false;
+        for(const auto& [name, bit] : table){
+            if(token == name){
+                flags |= bit;
+                matched = true;
+                break;
             }
         }
-        start = comma + 1;
+        if(!matched){
+            spdlog::warn("PTM: unknown structure family '{}' in --ptm_structures, ignoring", token);
+        }
     }
 
     _structureCheckFlags = flags;
@@ -168,6 +139,28 @@ void PolyhedralTemplateMatchingService::setIdentifyOrdering(bool identifyOrderin
     _identifyOrdering = identifyOrdering;
 }
 
+double PolyhedralTemplateMatchingService::cationRadiusFor(const TemplateMatcher& templates) const{
+    if(_cationNeighborRadius <= 0.0){
+        return 0.0;
+    }
+    if(templates.empty()){
+        spdlog::warn("PTM: --cation_radius {} ignored because no user templates are loaded", _cationNeighborRadius);
+        return 0.0;
+    }
+    return _cationNeighborRadius;
+}
+
+bool PolyhedralTemplateMatchingService::identifiesOrdering(const LammpsParser::Frame& frame, std::size_t atomCount) const{
+    if(!_identifyOrdering){
+        return false;
+    }
+    if(frame.types.size() < atomCount){
+        spdlog::warn("PTM: ordering identification requires per-atom types; the input dump has none");
+        return false;
+    }
+    return true;
+}
+
 json PolyhedralTemplateMatchingService::compute(
     const LammpsParser::Frame& frame,
     const std::string& outputBase,
@@ -189,46 +182,35 @@ json PolyhedralTemplateMatchingService::compute(
     AnalysisContext& context = session->context;
 
     try{
+        PolyhedralTemplateMatchingLog log;
         StructureAnalysis analysis(context);
         auto ptmAtomStates = std::make_shared<std::vector<PtmLocalAtomState>>();
 
-        // PTM, cluster building, symmetry canonicalization and outputs. The outputs weigh more than
-        // in a serial plugin: PTM runs in parallel, the neighbor lattice export does not.
-        ProgressSteps steps({4.0, 2.0, 1.0, 3.0});
+        // The outputs weigh more than in a serial plugin: PTM runs in parallel, the neighbor
+        // lattice export does not.
+        ProgressSteps steps({
+            {"Running PTM", 4.0},
+            {"Building clusters", 2.0},
+            {"Canonicalizing cluster symmetry", 1.0},
+            {"Writing outputs", 3.0},
+        });
         TemplateMatcher templates;
         if(!_latticeDirectory.empty()){
-            const Stopwatch templatesTimer;
-            const int loaded = templates.loadDirectory(_latticeDirectory);
-            if(loaded == 0){
-                spdlog::warn("PTM: no user templates loaded from '{}'", _latticeDirectory);
-            }else{
-                spdlog::info("Loaded {} user templates in {}", loaded, templatesTimer.elapsed());
-            }
+            log.dump(templates.loadDirectory(_latticeDirectory));
         }
 
         const TemplateMatcher* templatesPtr = templates.empty() ? nullptr : &templates;
-        const bool clusterTemplates = (templatesPtr != nullptr && _cationNeighborRadius > 0.0);
-        const double cationRadius = clusterTemplates ? _cationNeighborRadius : 0.0;
-        if(_cationNeighborRadius > 0.0 && !clusterTemplates){
-            spdlog::warn("PTM: --cation_radius {} ignored because no user templates are loaded", _cationNeighborRadius);
-        }
-
-        const bool identifyOrdering = _identifyOrdering
-            && frame.types.size() >= context.atomCount();
-        if(_identifyOrdering && !identifyOrdering){
-            spdlog::warn("PTM: ordering identification requires per-atom types; the input dump has none");
-        }
+        const double cationRadius = cationRadiusFor(templates);
+        const bool clusterTemplates = cationRadius > 0.0;
+        const bool identifyOrdering = identifiesOrdering(frame, context.atomCount());
 
         PtmRmsdCutoffReport rmsdCutoffReport;
-        spdlog::info("Running PTM on {} atoms (RMSD cutoff {}{})...",
-                     context.atomCount(), _rmsd, identifyOrdering ? ", identifying chemical ordering" : "");
-        const Stopwatch ptmTimer;
         determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
                                         _structureCheckFlags,
                                         identifyOrdering ? frame.types.data() : nullptr,
                                         &rmsdCutoffReport);
-        spdlog::info("PTM finished in {}", ptmTimer.elapsed());
-        steps.next("Building clusters");
+        log.dump(analysis);
+        steps.next();
         analysis.setClusterRuleProvider(nullptr);
         std::fill(
             context.atomSymmetryPermutations->dataInt(),
@@ -247,10 +229,7 @@ json PolyhedralTemplateMatchingService::compute(
             }
         }
 
-        const Stopwatch clusterTimer;
         if(clusterTemplates){
-            spdlog::info("Joining user-template atoms into grains by orientation (misorientation tolerance {} deg)",
-                         _cationMisorientation);
             analysis.setCrystalInfoProvider(
                 std::make_shared<TemplateCrystalInfoProvider>(
                     PtmStructureAnalysisDetail::ptmCrystalInfoProvider(),
@@ -268,55 +247,35 @@ json PolyhedralTemplateMatchingService::compute(
                 }
             }
 
-            analysis.setClusterRuleProvider(
-                std::make_shared<OrientationBasedClusterRule>(
-                    orientationStates,
-                    context.neighborOffsets->constDataInt(),
-                    context.neighborIndices ? context.neighborIndices->constDataInt() : nullptr,
-                    context.structureTypes->constDataInt(),
-                    context.atomCount(),
-                    _cationMisorientation
-                )
+            const auto orientationRule = std::make_shared<OrientationBasedClusterRule>(
+                orientationStates,
+                context.neighborOffsets->constDataInt(),
+                context.neighborIndices ? context.neighborIndices->constDataInt() : nullptr,
+                context.structureTypes->constDataInt(),
+                context.atomCount(),
+                _cationMisorientation
             );
+            log.dump(*orientationRule);
+            analysis.setClusterRuleProvider(orientationRule);
         }else if(context.inputCrystalType == LATTICE_SC){
-            spdlog::info("Using the PTM-orientation cluster rule for the SC input lattice");
             analysis.setClusterRuleProvider(
                 std::make_shared<OrientationClusterRuleProvider>(buildOrientationClusterStates(ptmAtomStates))
             );
         }
 
-        spdlog::info("Building clusters{}...", _dissolveSmallClusters ? " (small clusters are dissolved)" : "");
         ClusterBuilder clusterBuilder(analysis, context);
-        clusterBuilder.build(_dissolveSmallClusters);
-        steps.next("Canonicalizing cluster symmetry");
+        const BuiltClusters clusters = clusterBuilder.build(_dissolveSmallClusters);
+        steps.next();
         normalizeReconstructedClusterGraphForExport(analysis, context);
-        spdlog::info("Built {} clusters in {}", analysis.clusterGraph().clusters().size() - 1, clusterTimer.elapsed());
-        steps.next("Writing outputs");
+        log.dump(clusters);
+        steps.next();
 
         for(const auto& [atomIndex, type] : matchedTypes){
             context.structureTypes->setInt(atomIndex, type);
         }
 
-        std::map<int, int> structureCounts;
-        for(std::size_t atomIndex = 0; atomIndex < context.atomCount(); ++atomIndex){
-            structureCounts[context.structureTypes ? context.structureTypes->getInt(atomIndex) : 0]++;
-        }
-
-        std::string structureSummary;
-        for(const auto& [structureType, count] : structureCounts){
-            if(structureType == StructureType::OTHER){
-                continue;
-            }
-            const std::string templateName = templates.structureName(structureType);
-            appendCountSummary(structureSummary, templateName.empty() ? structureTypeName(structureType) : templateName,
-                               count, context.atomCount());
-        }
-        if(const auto other = structureCounts.find(StructureType::OTHER); other != structureCounts.end()){
-            appendCountSummary(structureSummary, structureTypeName(StructureType::OTHER), other->second, context.atomCount());
-        }
-        if(!structureSummary.empty()){
-            spdlog::info("Structure types: {}", structureSummary);
-        }
+        const std::map<int, int> structureCounts = countTypes(context.structureTypes->constIntRange());
+        log.dump(structureCounts);
 
         json result = AnalysisResult::success();
         result["main_listing"] = {
@@ -361,19 +320,7 @@ json PolyhedralTemplateMatchingService::compute(
                 });
             }
             result["sub_listings"]["ordering_counts"] = std::move(orderingCountRows);
-
-            std::string orderingSummary;
-            for(const auto& [orderingType, count] : orderingCounts){
-                if(orderingType != static_cast<int>(PTM::OrderingType::ORDERING_NONE)){
-                    appendCountSummary(orderingSummary, PTM::orderingTypeName(orderingType), count, context.atomCount());
-                }
-            }
-            if(const auto none = orderingCounts.find(static_cast<int>(PTM::OrderingType::ORDERING_NONE)); none != orderingCounts.end()){
-                appendCountSummary(orderingSummary, PTM::orderingTypeName(none->first), none->second, context.atomCount());
-            }
-            if(!orderingSummary.empty()){
-                spdlog::info("Ordering types: {}", orderingSummary);
-            }
+            log.dump(orderingCounts);
         }
 
         result["per-atom-properties"] = json::array();
@@ -383,35 +330,15 @@ json PolyhedralTemplateMatchingService::compute(
             const std::size_t atomCount = context.atomCount();
             auto rmsdProperty = std::make_shared<ParticleProperty>(atomCount, DataType::Double, 1, 0, true);
             double* rmsdData = rmsdProperty->dataDouble();
-            std::size_t rmsdAtoms = 0;
-            double rmsdSum = 0.0;
-            double rmsdMin = std::numeric_limits<double>::infinity();
-            double rmsdMax = 0.0;
             for(std::size_t atomIndex = 0; atomIndex < atomCount; ++atomIndex){
                 rmsdData[atomIndex] = (atomIndex < ptmAtomStates->size() && (*ptmAtomStates)[atomIndex].valid)
                     ? (*ptmAtomStates)[atomIndex].rmsd : -1.0;
-                if(rmsdData[atomIndex] >= 0.0){
-                    ++rmsdAtoms;
-                    rmsdSum += rmsdData[atomIndex];
-                    rmsdMin = std::min(rmsdMin, rmsdData[atomIndex]);
-                    rmsdMax = std::max(rmsdMax, rmsdData[atomIndex]);
-                }
-            }
-            if(rmsdAtoms > 0){
-                spdlog::info("RMSD of matched atoms: min {:.4f}, mean {:.4f}, max {:.4f}",
-                             rmsdMin, rmsdSum / static_cast<double>(rmsdAtoms), rmsdMax);
             }
             extraDumpColumns.push_back({ "rmsd", rmsdProperty });
         }
-
-        std::future<void> atomsExportFuture;
+        log.dump(*ptmAtomStates);
 
         if(!outputBase.empty()){
-            const std::string analysisPath = outputBase + "_ptm_analysis.parquet";
-            const std::string atomsPath = outputBase + "_atoms.parquet";
-            spdlog::info("Launching atoms data export...");
-            const Stopwatch atomsExportTimer;
-
             auto ptmColumnWriter = [&ptmAtomStates, identifyOrdering](ColumnarAtomWriter& writer, std::size_t atomIndex, int){
                 if(atomIndex >= ptmAtomStates->size()){
                     return;
@@ -445,11 +372,11 @@ json PolyhedralTemplateMatchingService::compute(
 #else
             constexpr auto atomsExportLaunch = std::launch::async;
 #endif
-            atomsExportFuture = std::async(
+            std::future<AtomsTable> atomsTable = std::async(
                 atomsExportLaunch,
-                [&, atomsPath, ptmColumnWriter, nameResolver]{
-                    StructureIdentificationExport::streamStructureIdentificationToParquet(
-                        atomsPath,
+                [&, ptmColumnWriter, nameResolver]{
+                    return StructureIdentificationExport::writeAtomsTable(
+                        outputBase,
                         frame,
                         analysis,
                         nameResolver,
@@ -458,9 +385,7 @@ json PolyhedralTemplateMatchingService::compute(
                 }
             );
 
-            spdlog::info("Writing annotated dump and cluster tables for DXA...");
-            const Stopwatch clusterOutputsTimer;
-            if(!AnalysisPipelineUtils::appendClusterOutputs(
+            const auto clusterOutputs = AnalysisPipelineUtils::appendClusterOutputs(
                 frame,
                 outputBase,
                 annotatedDumpPath,
@@ -469,19 +394,14 @@ json PolyhedralTemplateMatchingService::compute(
                 result,
                 &frameError,
                 extraDumpColumns
-            )){
-                atomsExportFuture.wait();
+            );
+            if(!clusterOutputs){
+                atomsTable.wait();
                 return AnalysisResult::failure(frameError);
             }
-            spdlog::info("Cluster outputs written in {}: annotated dump, clusters table, cluster transitions table, neighbor lattice",
-                         clusterOutputsTimer.elapsed());
-
-            JsonUtils::writeJsonToParquet(result, analysisPath, false);
-            spdlog::info("Summary parquet written to {}", analysisPath);
-            const Stopwatch atomsExportWait;
-            atomsExportFuture.get();
-            spdlog::info("Exported atoms data to: {} ({} after launch, {} spent waiting for it)",
-                         atomsPath, atomsExportTimer.elapsed(), atomsExportWait.elapsed());
+            log.dump(clusterOutputs);
+            log.dump(JsonUtils::writeSummaryTable(result, outputBase, "ptm_analysis"));
+            log.dump(atomsTable.get());
         }else if(!AnalysisPipelineUtils::appendClusterOutputs(
             frame,
             outputBase,

@@ -8,7 +8,6 @@
 #include <ptm_structure_matcher.h>
 
 #include <yaml-cpp/yaml.h>
-#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cmath>
@@ -22,7 +21,7 @@ namespace Volt{
 
 using Vec3 = std::array<double, 3>;
 
-double calcRmsd(int numPoints, const double (*idealPoints)[3],
+double TemplateMatcher::calcRmsd(int numPoints, const double (*idealPoints)[3],
                 double (*normalized)[3], std::int8_t* mapping,
                 double* quaternionOut, double* scaleOut)
 {
@@ -40,7 +39,7 @@ double calcRmsd(int numPoints, const double (*idealPoints)[3],
     return ptm::calc_rmsd(numPoints, idealPoints, normalized, mapping, gramIdeal, gramMeasured, e0, quaternionOut, scaleOut);
 }
 
-Vec3 quatRotate(const double* quaternion, const Vec3& vector){
+Vec3 TemplateMatcher::quatRotate(const double* quaternion, const Vec3& vector){
     double rotation[9];
     ptm::quaternion_to_rotation_matrix(const_cast<double*>(quaternion), rotation);
     return {
@@ -50,7 +49,7 @@ Vec3 quatRotate(const double* quaternion, const Vec3& vector){
     };
 }
 
-std::vector<Vec3> buildTemplatePoints(const TemplateDefinition& definition){
+std::vector<Vec3> TemplateMatcher::buildTemplatePoints(const TemplateDefinition& definition){
     const Vec3 center = {
         definition.basisCartesian[static_cast<std::size_t>(definition.referenceBasisAtomIndex)].x(),
         definition.basisCartesian[static_cast<std::size_t>(definition.referenceBasisAtomIndex)].y(),
@@ -93,7 +92,7 @@ std::vector<Vec3> buildTemplatePoints(const TemplateDefinition& definition){
     return points;
 }
 
-void enumerateAutomorphisms(int neighborCount, const bool adjacency[PTM_MAX_NBRS][PTM_MAX_NBRS],
+void TemplateMatcher::enumerateAutomorphisms(int neighborCount, const bool adjacency[PTM_MAX_NBRS][PTM_MAX_NBRS],
                             const std::int8_t* degree,
                             std::vector<std::array<std::int8_t, PTM_MAX_POINTS>>& out)
 {
@@ -140,7 +139,7 @@ void enumerateAutomorphisms(int neighborCount, const bool adjacency[PTM_MAX_NBRS
     recurse(0);
 }
 
-bool hullCanonical(int numPoints, const double (*points)[3], int wantFacets,
+bool TemplateMatcher::hullCanonical(int numPoints, const double (*points)[3], int wantFacets,
                    std::int8_t facetsOut[PTM_MAX_FACETS][3], int& numFacetsOut,
                    std::int8_t* degreeOut, std::int8_t* canonicalLabellingOut,
                    std::uint64_t* hashOut, std::int8_t* codeOut, int* numEdgesOut)
@@ -359,7 +358,7 @@ bool TemplateMatcher::addTemplate(const TemplateDefinition& definition, std::str
     return true;
 }
 
-bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition& out, std::string* error){
+bool TemplateMatcher::readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition& out, std::string* error){
     const auto fail = [&](const std::string& message){
         if(error){
             *error = message + " ('" + filePath.string() + "')";
@@ -437,13 +436,17 @@ bool readTemplateFile(const std::filesystem::path& filePath, TemplateDefinition&
     return true;
 }
 
-int TemplateMatcher::loadDirectory(const std::filesystem::path& directory){
+std::size_t TemplateDirectory::loadedTemplates() const{
+    return static_cast<std::size_t>(std::ranges::count_if(files, [](const File& file){ return file.error.empty(); }));
+}
+
+TemplateDirectory TemplateMatcher::loadDirectory(const std::filesystem::path& directory){
+    TemplateDirectory loaded{directory.string()};
     std::error_code errorCode;
     if(!std::filesystem::exists(directory, errorCode) || !std::filesystem::is_directory(directory, errorCode)){
-        spdlog::warn("TemplateMatcher: lattices directory '{}' not found; no user templates loaded",
-                     directory.string());
-        return 0;
+        return loaded;
     }
+    loaded.found = true;
 
     std::vector<std::filesystem::path> files;
     for(const auto& entry : std::filesystem::directory_iterator(directory, errorCode)){
@@ -459,24 +462,23 @@ int TemplateMatcher::loadDirectory(const std::filesystem::path& directory){
     }
     std::sort(files.begin(), files.end());
 
-    int loadedCount = 0;
     for(const auto& file : files){
+        TemplateDirectory::File& entry = loaded.files.emplace_back();
+        entry.path = file.string();
         TemplateDefinition definition;
-        std::string error;
-        if(!readTemplateFile(file, definition, &error)){
-            spdlog::warn("TemplateMatcher: skipping '{}': {}", file.string(), error);
+        if(!readTemplateFile(file, definition, &entry.error)){
             continue;
         }
-        if(!addTemplate(definition, &error)){
-            spdlog::warn("TemplateMatcher: skipping template '{}': {}", definition.name, error);
+        entry.read = true;
+        entry.templateName = definition.name;
+        if(!addTemplate(definition, &entry.error)){
             continue;
         }
-        spdlog::info("TemplateMatcher: loaded template '{}' (coordination {}, {} runtime graphs) as structure_type {}",
-                     definition.name, definition.coordinationNumber, _templates.back().graphs.size(),
-                     _templates.back().structureType);
-        ++loadedCount;
+        entry.coordinationNumber = definition.coordinationNumber;
+        entry.graphs = _templates.back().graphs.size();
+        entry.structureType = _templates.back().structureType;
     }
-    return loadedCount;
+    return loaded;
 }
 
 TemplateMatch TemplateMatcher::matchBest(const double (*points)[3], int numEnvPoints,

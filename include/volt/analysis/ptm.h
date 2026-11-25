@@ -305,6 +305,17 @@ public:
 
 private:
     friend class Kernel;
+
+    // What ptm_index() hands getNeighbors() for one atom.
+    struct ptmnbrdata_t{
+        const PTM* neighFinder;
+        const int* particleTypes;
+        const std::vector<uint64_t>* cachedNeighbors;
+    };
+
+    // The atom's neighbors in the order PTM cached them, as ptm_index() asks for them.
+    static int getNeighbors(void* vdata, size_t, size_t atomIndex, int numRequested, ptm_atomicenv_t* env);
+
     size_t _particleCount = 0;
     const int* _particleTypes = nullptr;
     const Point3* _sourcePositions = nullptr;
