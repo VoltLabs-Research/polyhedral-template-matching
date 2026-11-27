@@ -227,27 +227,16 @@ json PolyhedralTemplateMatchingService::compute(
         json result = AnalysisResult::success();
         result["main_listing"] = {
             {"total_atoms", frame.natoms},
-            {"structure_count", static_cast<int>(structureCounts.size())},
+            {"structure_count", structureCounts.size()},
             {"rmsd", _rmsd},
-            {"atoms_discarded_by_rmsd", static_cast<std::int64_t>(rmsdCutoffReport.rejectedAtoms)},
+            {"atoms_discarded_by_rmsd", rmsdCutoffReport.rejectedAtoms},
             {"smallest_discarded_rmsd", rmsdCutoffReport.smallestRejectedRmsd},
             {"median_discarded_rmsd", rmsdCutoffReport.medianRejectedRmsd}
         };
 
-        json structureCountRows = json::array();
-        const double totalAtomsForFraction = context.atomCount() > 0
-            ? static_cast<double>(context.atomCount()) : 1.0;
-        for(const auto& [structureType, count] : structureCounts){
-            structureCountRows.push_back({
-                {"structure_id", structureType},
-                {"structure_name", structureTypeName(structureType)},
-                {"count", static_cast<int64_t>(count)},
-                {"fraction", static_cast<double>(count) / totalAtomsForFraction}
-            });
-        }
-
-        result["sub_listings"] = json::object();
-        result["sub_listings"]["structure_counts"] = std::move(structureCountRows);
+        result["sub_listings"]["structure_counts"] = StructureIdentificationExport::structureCountRows(
+            structureCounts, context.atomCount()
+        );
 
         if(identifyOrdering){
             std::map<int, std::int64_t> orderingCounts;
@@ -257,6 +246,8 @@ json PolyhedralTemplateMatchingService::compute(
                     : static_cast<int>(PTM::OrderingType::ORDERING_NONE)]++;
             }
 
+            const double totalAtomsForFraction = context.atomCount() > 0
+                ? static_cast<double>(context.atomCount()) : 1.0;
             json orderingCountRows = json::array();
             for(const auto& [orderingType, count] : orderingCounts){
                 orderingCountRows.push_back({
@@ -286,7 +277,7 @@ json PolyhedralTemplateMatchingService::compute(
         log.dump(*ptmAtomStates);
 
         if(!outputBase.empty()){
-            auto ptmColumnWriter = [&ptmAtomStates, identifyOrdering](ColumnarAtomWriter& writer, std::size_t atomIndex, int){
+            auto ptmColumnWriter = [&ptmAtomStates, identifyOrdering](ColumnarRowWriter& writer, std::size_t atomIndex, int){
                 if(atomIndex >= ptmAtomStates->size()){
                     return;
                 }
@@ -294,13 +285,12 @@ json PolyhedralTemplateMatchingService::compute(
                 if(!state.valid){
                     return;
                 }
-                const Quaternion orientation = state.orientation.normalized();
                 writer.field("rmsd", state.rmsd);
-                writer.field("orientation", std::vector<double>{orientation.x(), orientation.y(), orientation.z(), orientation.w()});
+                writer.field("orientation", state.orientation.normalized());
                 writer.field("interatomic_distance", state.interatomicDistance);
                 writer.field("correspondences", static_cast<std::int64_t>(state.correspondencesCode));
                 if(identifyOrdering){
-                    writer.field("ordering_type", static_cast<std::int64_t>(state.orderingType));
+                    writer.field("ordering_type", state.orderingType);
                 }
             };
 
