@@ -56,19 +56,12 @@ struct PtmDiamondShells{
     std::size_t demotedAtoms = 0;
 };
 
-// The same-template neighbors of each user-template atom within the cation radius.
-struct PtmCationNetwork{
-    std::vector<std::array<int, MAX_NEIGHBORS>> neighbors;
-    double radius = 0.0;
-};
-
 void computeMaximumNeighborDistanceFromPTM(StructureAnalysis& analysis);
 void determineLocalStructuresWithPTM(
     StructureAnalysis& analysis,
     double rmsdCutoff,
     std::shared_ptr<std::vector<PtmLocalAtomState>> atomStates = nullptr,
     const TemplateMatcher* templates = nullptr,
-    double cationNeighborRadius = 0.0,
     int structureCheckFlags = 0,
     const int* particleTypes = nullptr,
     PtmRmsdCutoffReport* rmsdCutoffReport = nullptr

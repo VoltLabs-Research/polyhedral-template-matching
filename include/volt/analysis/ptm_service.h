@@ -26,10 +26,6 @@ public:
     void setDissolveSmallClusters(bool dissolveSmallClusters);
     void setLatticesDirectory(std::string latticesDirectory);
 
-    void setCationNeighborRadius(double radius);
-
-    void setCationMisorientation(double degrees);
-
     void setStructureCheckFlags(std::string families);
 
     void setIdentifyOrdering(bool identifyOrdering);
@@ -41,8 +37,6 @@ public:
     );
 
 private:
-    // The cation radius the template-atom network is grown with: none without user templates.
-    double cationRadiusFor(const TemplateMatcher& templates) const;
     // Whether the run identifies chemical ordering, which needs the per-atom types.
     bool identifiesOrdering(const LammpsParser::Frame& frame, std::size_t atomCount) const;
 
@@ -56,8 +50,6 @@ private:
     double _rmsd;
     bool _dissolveSmallClusters;
     std::string _latticeDirectory;
-    double _cationNeighborRadius;
-    double _cationMisorientation;
     int _structureCheckFlags;
     bool _identifyOrdering;
 };

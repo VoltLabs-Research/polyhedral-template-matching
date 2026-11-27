@@ -11,8 +11,6 @@
 #include <volt/analysis/ptm_structure_analysis.h>
 #include <volt/analysis/ptm_crystal_info_provider.h>
 #include <volt/matcher/template_matcher.h>
-#include <volt/matcher/template_crystal_info_provider.h>
-#include <volt/cluster-rules/orientation_based.h>
 
 #include <volt/core/lammps_parser.h>
 #include <volt/core/analysis_result.h>
@@ -71,8 +69,6 @@ PolyhedralTemplateMatchingService::PolyhedralTemplateMatchingService()
     , _rmsd(0.1)
     , _dissolveSmallClusters(false)
     , _latticeDirectory()
-    , _cationNeighborRadius(0.0)
-    , _cationMisorientation(12.0)
     , _structureCheckFlags(0)
     , _identifyOrdering(false){}
 
@@ -127,27 +123,8 @@ void PolyhedralTemplateMatchingService::setLatticesDirectory(std::string lattice
     _latticeDirectory = std::move(latticesDirectory);
 }
 
-void PolyhedralTemplateMatchingService::setCationNeighborRadius(double radius){
-    _cationNeighborRadius = radius;
-}
-
-void PolyhedralTemplateMatchingService::setCationMisorientation(double degrees){
-    _cationMisorientation = degrees;
-}
-
 void PolyhedralTemplateMatchingService::setIdentifyOrdering(bool identifyOrdering){
     _identifyOrdering = identifyOrdering;
-}
-
-double PolyhedralTemplateMatchingService::cationRadiusFor(const TemplateMatcher& templates) const{
-    if(_cationNeighborRadius <= 0.0){
-        return 0.0;
-    }
-    if(templates.empty()){
-        spdlog::warn("PTM: --cation_radius {} ignored because no user templates are loaded", _cationNeighborRadius);
-        return 0.0;
-    }
-    return _cationNeighborRadius;
 }
 
 bool PolyhedralTemplateMatchingService::identifiesOrdering(const LammpsParser::Frame& frame, std::size_t atomCount) const{
@@ -200,12 +177,10 @@ json PolyhedralTemplateMatchingService::compute(
         }
 
         const TemplateMatcher* templatesPtr = templates.empty() ? nullptr : &templates;
-        const double cationRadius = cationRadiusFor(templates);
-        const bool clusterTemplates = cationRadius > 0.0;
         const bool identifyOrdering = identifiesOrdering(frame, context.atomCount());
 
         PtmRmsdCutoffReport rmsdCutoffReport;
-        determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr, cationRadius,
+        determineLocalStructuresWithPTM(analysis, _rmsd, ptmAtomStates, templatesPtr,
                                         _structureCheckFlags,
                                         identifyOrdering ? frame.types.data() : nullptr,
                                         &rmsdCutoffReport);
@@ -229,35 +204,7 @@ json PolyhedralTemplateMatchingService::compute(
             }
         }
 
-        if(clusterTemplates){
-            analysis.setCrystalInfoProvider(
-                std::make_shared<TemplateCrystalInfoProvider>(
-                    PtmStructureAnalysisDetail::ptmCrystalInfoProvider(),
-                    templates,
-                    MAX_NEIGHBORS
-                )
-            );
-
-            auto orientationStates = std::make_shared<std::vector<OrientationBasedAtomState>>(ptmAtomStates->size());
-            for(std::size_t atomIndex = 0; atomIndex < ptmAtomStates->size(); ++atomIndex){
-                const PtmLocalAtomState& source = (*ptmAtomStates)[atomIndex];
-                (*orientationStates)[atomIndex].valid = source.valid;
-                if(source.valid){
-                    (*orientationStates)[atomIndex].orientation = quaternionToMatrix(source.orientation);
-                }
-            }
-
-            const auto orientationRule = std::make_shared<OrientationBasedClusterRule>(
-                orientationStates,
-                context.neighborOffsets->constDataInt(),
-                context.neighborIndices ? context.neighborIndices->constDataInt() : nullptr,
-                context.structureTypes->constDataInt(),
-                context.atomCount(),
-                _cationMisorientation
-            );
-            log.dump(*orientationRule);
-            analysis.setClusterRuleProvider(orientationRule);
-        }else if(context.inputCrystalType == LATTICE_SC){
+        if(context.inputCrystalType == LATTICE_SC){
             analysis.setClusterRuleProvider(
                 std::make_shared<OrientationClusterRuleProvider>(buildOrientationClusterStates(ptmAtomStates))
             );

@@ -9,10 +9,8 @@
 
 namespace Volt{
 
-class OrientationBasedClusterRule;
 class StructureAnalysis;
 class StructureContext;
-struct PtmCationNetwork;
 struct PtmDiamondShells;
 struct PtmLocalAtomState;
 struct PtmNeighborOrder;
@@ -27,7 +25,6 @@ public:
     // The user templates it loads name their atoms in the structure counts.
     void dump(const TemplateDirectory& directory);
     void dump(const StructureAnalysis& identified);
-    void dump(const OrientationBasedClusterRule& rule);
     // The atoms of each structure type, and of each chemical ordering type, keyed by type.
     void dump(const std::map<int, int>& structureCounts);
     void dump(const std::map<int, std::int64_t>& orderingCounts);
@@ -36,7 +33,6 @@ public:
     void dump(const PtmNeighborOrder& order);
     void dump(const PtmRmsdCutoffReport& matching);
     void dump(const PtmDiamondShells& shells);
-    void dump(const PtmCationNetwork& network);
     void dump(const StructureContext& neighborLists);
 
 private:

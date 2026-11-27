@@ -3,7 +3,6 @@
 #include <volt/analysis/ptm.h>
 #include <volt/analysis/ptm_structure_analysis.h>
 #include <volt/analysis/structure_analysis.h>
-#include <volt/cluster-rules/orientation_based.h>
 #include <volt/matcher/template_matcher.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/core/type_counts.h>
@@ -67,16 +66,6 @@ void PolyhedralTemplateMatchingLog::dump(const TemplateDirectory& directory){
 
 void PolyhedralTemplateMatchingLog::dump(const StructureAnalysis&){
     spdlog::info("PTM finished in {}", phaseElapsed());
-}
-
-void PolyhedralTemplateMatchingLog::dump(const OrientationBasedClusterRule& rule){
-    const auto& fit = rule.angleFit();
-    if(!fit){
-        return;
-    }
-    spdlog::info("PTM: {} cation pairs, {} reference angles kept, covering {}/{} pairs ({:.1f}%)",
-                 fit->pairs, rule.referenceAngleCount(), fit->coveredPairs, std::max<long>(fit->pairs, 1),
-                 fit->pairs > 0 ? 100.0 * fit->coveredPairs / fit->pairs : 0.0);
 }
 
 void PolyhedralTemplateMatchingLog::dump(const std::map<int, int>& structureCounts){
@@ -157,10 +146,6 @@ void PolyhedralTemplateMatchingLog::dump(const PtmRmsdCutoffReport& matching){
 void PolyhedralTemplateMatchingLog::dump(const PtmDiamondShells& shells){
     spdlog::info("  Diamond neighbor shells reordered by CNA in {}: {} atoms kept, {} set to Other",
                  phaseElapsed(), shells.keptAtoms, shells.demotedAtoms);
-}
-
-void PolyhedralTemplateMatchingLog::dump(const PtmCationNetwork& network){
-    spdlog::info("  Template-atom network built in {} (radius {} A)", phaseElapsed(), network.radius);
 }
 
 void PolyhedralTemplateMatchingLog::dump(const StructureContext& neighborLists){
